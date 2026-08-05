@@ -4,13 +4,7 @@
 
 本仓库依据课程笔记按功能链路逐步重建。后端使用 Python、FastAPI 和 LangGraph；原课程的静态 HTML 前端将替换为 Vue 3。
 
-## 当前进度
-
-- [x] 第 1 步：初始化仓库和工程规范
-- [ ] 第 2 步：搭建 etcd、MinIO、Milvus、Attu、MongoDB
-- [ ] 后续：按 `docs/development-log.md` 持续记录
-
-## 规划目录
+## 项目结构
 
 ```text
 .
@@ -31,11 +25,9 @@
 - 不提交用户上传文档、MinerU 中间产物或向量数据库数据。
 - 所有可公开配置写入 `.env.example`，真实值只保存在本机 `.env`。
 
-## 开发环境基线
+## 开发记录
 
-课程建议 Python 3.10。当前机器默认 Python 为 3.13.9，因此在后端依赖安装阶段会先准备独立的 Python 3.10 环境，以降低 MinerU、PyTorch 和 BGE 相关依赖的兼容风险。
-
-完整的逐步变更记录见 [`docs/development-log.md`](docs/development-log.md)。
+逐步还原过程、目录差异、文件职责和验证结果单独记录在 [`docs/development-log.md`](docs/development-log.md)，不与项目使用说明混写。
 
 ## 许可证
 
