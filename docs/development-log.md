@@ -121,3 +121,128 @@ Docker CLI 检查时无法在当前受限执行环境中读取用户目录下的
 ### 下一步
 
 第 2 步将创建并验证 etcd、MinIO、Milvus、Attu、MongoDB 的 Docker Compose 配置，并在本节之后追加新的目录差异与文件说明。
+
+## 第 2 步：搭建五容器基础设施
+
+日期：2026-08-05
+
+### 本步目标
+
+1. 连接用户创建的 GitHub 仓库 `ChanghlbsDD/shopkeeper-brain`。
+2. 使用 Docker Compose 管理 etcd、MinIO、Milvus、Attu、MongoDB。
+3. 固定镜像版本、服务依赖、健康检查、网络和数据卷。
+4. 让服务端口默认只监听本机回环地址。
+5. 真实拉取镜像并验证五个容器能够正常运行。
+
+### 与第 1 步的目录区别
+
+第 1 步结束时，`deploy` 目录只有职责说明：
+
+```text
+deploy/
+└── README.md
+```
+
+本步新增 Compose 文件，并更新已有配置与使用文档：
+
+```text
+掌柜智库/
+├── deploy/
+│   ├── README.md             # 已更新：加入版本、命令、端口和数据说明
+│   └── docker-compose.yml    # 新增：五容器可执行配置
+├── docs/
+│   └── development-log.md    # 已更新：增加第 2 步记录
+├── .env.example              # 已更新：增加容器端口及认证配置
+└── README.md                 # 已更新：增加稳定的基础设施启动说明
+```
+
+后端和前端目录没有新增业务代码。`.git/` 中增加了 GitHub `origin` 地址，但 Git 内部目录不在项目树中展开。
+
+### 新文件作用
+
+| 文件 | 作用 |
+| --- | --- |
+| `deploy/docker-compose.yml` | 定义五个服务、固定镜像、健康检查、依赖顺序、本地端口、专用网络和命名卷，是本步唯一新增的项目文件。 |
+
+### 修改文件作用
+
+| 文件 | 本步改动 |
+| --- | --- |
+| `.env.example` | 增加 MinIO、Milvus、Attu、MongoDB 的端口和本地开发认证变量，并保证后端与 Milvus 使用相同 MinIO 凭据。 |
+| `deploy/README.md` | 将占位说明扩展为完整的启动、查看、停止、端口和持久化操作手册。 |
+| `README.md` | 增加面向使用者的基础设施快速启动方式；没有写入开发流水。 |
+| `docs/development-log.md` | 记录本步实际操作、前后差异、新文件职责和验证结果。 |
+
+### 版本选择
+
+| 服务 | 镜像版本 | 选择依据 |
+| --- | --- | --- |
+| etcd | `quay.io/coreos/etcd:v3.5.25` | 参考 Milvus 2.6.20 官方 Compose。 |
+| MinIO | `minio/minio:RELEASE.2024-12-18T13-15-44Z` | Milvus 2.6 官方环境要求列出的兼容版本。 |
+| Milvus | `milvusdb/milvus:v2.6.20` | 使用当前稳定的 2.6 系列，不采用 3.0 测试版。 |
+| Attu | `zilliz/attu:v2.6.5` | Attu 官方兼容表对应 Milvus 2.6；Attu 3 不支持开源 Milvus 2.6。 |
+| MongoDB | `mongo:7.0.16` | 固定 7.0 补丁版本，满足课程的会话历史功能且避免浮动标签。 |
+
+参考资料：
+
+- [Milvus 2.6.20 官方 Docker Compose](https://raw.githubusercontent.com/milvus-io/milvus/v2.6.20/deployments/docker/standalone/docker-compose.yml)
+- [Milvus Docker 环境要求](https://milvus.io/docs/v2.6.x/prerequisite-docker.md)
+- [Attu 2.6.5 使用及兼容说明](https://github.com/zilliztech/attu/tree/v2.6.5)
+
+### 服务设计
+
+- Compose 项目名固定为 `shopkeeper-brain`，专用网络为 `shopkeeper-knowledge`。
+- etcd 和 MinIO 健康后才启动 Milvus，Milvus 健康后才启动 Attu。
+- 对外端口全部绑定 `127.0.0.1`，不会直接暴露到局域网。
+- etcd、MinIO、Milvus、MongoDB 分别使用独立命名卷。
+- `docker compose down` 不删除命名卷；没有提供默认自动清库命令。
+- MinIO 同时供 Milvus 存储对象和后续后端存储文档图片使用。
+
+### 实际执行与验证
+
+Docker Desktop 初始未运行，启动后检测到：
+
+```text
+Docker Engine: 29.3.1
+CPU: 32
+Docker 可用内存: 约 7.65 GiB
+```
+
+Milvus 官方建议 Standalone 至少使用 8 GB 内存。当前配置接近最低线，开发期间需要留意模型推理与 Milvus 同时运行时的内存压力。
+
+Compose 验证结果：
+
+- `docker compose config -q` 通过。
+- 配置准确解析出 5 个服务和 5 个固定镜像。
+- Attu、MinIO、Milvus、MongoDB 所有宿主机端口均绑定到 `127.0.0.1`。
+- 五个镜像拉取成功，专用网络和四个命名卷创建成功。
+- etcd、MinIO、Milvus、MongoDB 状态为 `healthy`，Attu 正常运行。
+- MinIO 健康端点返回 HTTP 200。
+- Milvus 健康端点返回 HTTP 200。
+- Attu 首页返回 HTTP 200。
+- MongoDB `db.adminCommand('ping')` 返回 `{"ok":1}`。
+
+容器启动后的空载内存约为：
+
+| 服务 | 空载内存 |
+| --- | --- |
+| etcd | 14 MiB |
+| MinIO | 83 MiB |
+| Milvus | 113 MiB |
+| Attu | 43 MiB |
+| MongoDB | 172 MiB |
+
+### 安全说明
+
+- 当前容器使用 `.env.example` 的示例凭据完成本机验证，端口只允许本机访问。
+- 正式在本机创建 `.env` 时，需要替换所有包含 `change-me` 的密码。
+- `.env` 已被 Git 忽略，不会进入 GitHub。
+- 没有创建、复制或提交课程资料中的真实 API Key。
+
+### Python 虚拟环境说明
+
+本步只有 YAML 和 Markdown，没有运行 Python、安装 Python 包或编写后端代码，因此尚未创建虚拟环境。开始第 3 步后端骨架前，必须先准备 Python 3.10 并创建 `backend/.venv`。
+
+### 下一步
+
+第 3 步将先准备 Python 3.10 虚拟环境，再创建 FastAPI 后端骨架、配置系统、日志、异常处理和基础设施健康检查。

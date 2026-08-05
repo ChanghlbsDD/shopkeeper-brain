@@ -1,0 +1,134 @@
+name: shopkeeper-brain
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: shopkeeper-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - knowledge
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: shopkeeper-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - knowledge
+
+  milvus:
+    image: milvusdb/milvus:v2.6.20
+    container_name: shopkeeper-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_REGION: us-east-1
+    ports:
+      - "127.0.0.1:${MILVUS_GRPC_PORT:-19530}:19530"
+      - "127.0.0.1:${MILVUS_WEB_PORT:-9091}:9091"
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      start_period: 90s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - knowledge
+
+  attu:
+    image: zilliz/attu:v2.6.5
+    container_name: shopkeeper-attu
+    restart: unless-stopped
+    environment:
+      MILVUS_URL: milvus:19530
+      ATTU_LOG_LEVEL: info
+    ports:
+      - "127.0.0.1:${ATTU_PORT:-7000}:3000"
+    depends_on:
+      milvus:
+        condition: service_healthy
+    networks:
+      - knowledge
+
+  mongodb:
+    image: mongo:7.0.16
+    container_name: shopkeeper-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-shopkeeper}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-shopkeeper-mongo-change-me}
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet
+          --username "$${MONGO_INITDB_ROOT_USERNAME}"
+          --password "$${MONGO_INITDB_ROOT_PASSWORD}"
+          --authenticationDatabase admin
+          --eval "quit(db.adminCommand('ping').ok ? 0 : 2)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - knowledge
+
+networks:
+  knowledge:
+    name: shopkeeper-knowledge
+
+volumes:
+  etcd-data:
+    name: shopkeeper-etcd-data
+  minio-data:
+    name: shopkeeper-minio-data
+  milvus-data:
+    name: shopkeeper-milvus-data
+  mongo-data:
+    name: shopkeeper-mongo-data

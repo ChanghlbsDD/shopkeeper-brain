@@ -25,6 +25,26 @@
 - 不提交用户上传文档、MinerU 中间产物或向量数据库数据。
 - 所有可公开配置写入 `.env.example`，真实值只保存在本机 `.env`。
 
+## 本地基础设施
+
+复制环境变量模板并启动五个基础设施容器：
+
+```powershell
+Copy-Item .env.example .env
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.yml ps
+```
+
+默认仅允许本机访问：
+
+- Attu：`http://localhost:7000`
+- MinIO 控制台：`http://localhost:9001`
+- Milvus gRPC：`localhost:19530`
+- Milvus WebUI/健康端口：`http://localhost:9091`
+- MongoDB：`localhost:27017`
+
+第一次启动前应修改 `.env` 中带有 `change-me` 的本地开发密码。
+
 ## 开发记录
 
 逐步还原过程、目录差异、文件职责和验证结果单独记录在 [`docs/development-log.md`](docs/development-log.md)，不与项目使用说明混写。
