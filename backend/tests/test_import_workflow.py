@@ -1,0 +1,46 @@
+from pathlib import Path
+
+import pytest
+
+from app.workflows.importing.graph import route_import_file, run_import_workflow
+from app.workflows.importing.state import create_import_state
+
+
+def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
+    source = tmp_path / "manual.pdf"
+    source.write_bytes(b"%PDF test fixture")
+
+    result = run_import_workflow(str(source), task_id="pdf-task")
+
+    assert result["completed_nodes"] == [
+        "entry_node",
+        "pdf_to_md_node",
+        "md_img_node",
+        "document_split_node",
+        "item_name_recognition_node",
+        "bge_embedding_node",
+        "import_milvus_node",
+    ]
+    assert result["task_id"] == "pdf-task"
+
+
+def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
+    source = tmp_path / "manual.md"
+    source.write_text("# Manual", encoding="utf-8")
+
+    result = run_import_workflow(str(source))
+
+    assert result["completed_nodes"] == [
+        "entry_node",
+        "md_img_node",
+        "document_split_node",
+        "item_name_recognition_node",
+        "bge_embedding_node",
+        "import_milvus_node",
+    ]
+    assert "pdf_to_md_node" not in result["node_durations_ms"]
+
+
+def test_router_rejects_state_without_file_type() -> None:
+    with pytest.raises(ValueError, match="没有设置可用的文件类型"):
+        route_import_file(create_import_state("manual.md"))

@@ -122,6 +122,10 @@ Docker CLI 检查时无法在当前受限执行环境中读取用户目录下的
 
 第 2 步将创建并验证 etcd、MinIO、Milvus、Attu、MongoDB 的 Docker Compose 配置，并在本节之后追加新的目录差异与文件说明。
 
+### 一句话总结
+
+第 1 步把空目录变成了具备 Git、工程边界、安全忽略规则和独立文档分工的项目骨架。
+
 ## 第 2 步：搭建五容器基础设施
 
 日期：2026-08-05
@@ -246,6 +250,10 @@ Compose 验证结果：
 ### 下一步
 
 第 3 步将先准备 Python 3.10 虚拟环境，再创建 FastAPI 后端骨架、配置系统、日志、异常处理和基础设施健康检查。
+
+### 一句话总结
+
+第 2 步用 Docker Compose 搭好了可持久化且仅供本机访问的五容器真实基础设施。
 
 ## 第 3 步：FastAPI 后端骨架
 
@@ -426,3 +434,159 @@ etcd 是 Milvus 的内部依赖，后端不直接访问；Milvus 健康检查成
 ### 下一步
 
 第 4 步将定义文档导入状态、节点基类与 LangGraph 工作流骨架，暂不一次性实现全部节点业务。
+
+### 一句话总结
+
+第 3 步在 Python 3.10 虚拟环境中建立了可运行、可测试并能连接真实基础设施的 FastAPI 后端骨架。
+
+## 第 4 步：文档导入 LangGraph 工作流骨架
+
+日期：2026-08-06
+
+### 本步目标
+
+1. 定义贯穿文档导入流程的共享状态，避免后续节点各自约定字段。
+2. 建立统一节点基类，集中处理日志、执行耗时和异常包装。
+3. 实现真实入口节点，校验文件并区分 PDF 与 Markdown 分支。
+4. 使用 LangGraph 串起课程中的七个导入节点。
+5. 让尚未开发的节点以明确的待实现节点参与流程，验证拓扑但不伪造业务结果。
+6. 为状态隔离、入口分支、异常边界和两条完整路径编写单元测试。
+
+### 与第 3 步的目录区别
+
+第 3 步结束时，`backend/app` 还没有 `workflows` 目录，测试也只覆盖配置、异常、健康接口和基础设施。本步新增以下内容：
+
+```text
+backend/
+├── app/
+│   └── workflows/
+│       ├── __init__.py
+│       └── importing/
+│           ├── nodes/
+│           │   ├── __init__.py
+│           │   ├── entry.py
+│           │   └── pending.py
+│           ├── __init__.py
+│           ├── base.py
+│           ├── exceptions.py
+│           ├── graph.py
+│           └── state.py
+├── tests/
+│   ├── test_import_nodes.py
+│   ├── test_import_state.py
+│   └── test_import_workflow.py
+├── README.md                  # 已更新：增加工作流边界和调用示例
+└── requirements.txt           # 已更新：增加 LangGraph
+```
+
+根目录 `README.md` 没有加入开发流水；本步过程仍只记录在本开发笔记中。
+
+### 新文件作用
+
+| 文件 | 作用 |
+| --- | --- |
+| `backend/app/workflows/__init__.py` | 声明后端 LangGraph 工作流包，为后续导入和查询流程提供统一目录。 |
+| `backend/app/workflows/importing/__init__.py` | 导出导入状态、已编译工作流和便捷运行函数。 |
+| `backend/app/workflows/importing/state.py` | 定义课程导入流程共享字段和深拷贝初始状态工厂，避免列表与字典跨任务共享。 |
+| `backend/app/workflows/importing/base.py` | 提供节点统一调用入口、日志、毫秒耗时统计和未知异常包装。 |
+| `backend/app/workflows/importing/exceptions.py` | 区分导入校验异常、节点异常和通用工作流异常。 |
+| `backend/app/workflows/importing/graph.py` | 创建七节点 LangGraph，配置 PDF/Markdown 条件分支、顺序边和运行入口。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 汇总当前可用的入口节点和待实现节点。 |
+| `backend/app/workflows/importing/nodes/entry.py` | 真实检查导入路径、文件存在性和扩展名，并写入分支标志、标题及标准化路径。 |
+| `backend/app/workflows/importing/nodes/pending.py` | 为后续六个业务节点提供不修改业务数据的显式占位实现，同时记录流程经过。 |
+| `backend/tests/test_import_state.py` | 验证默认可变字段互不共享，并验证任务、文件和输出目录初始值。 |
+| `backend/tests/test_import_nodes.py` | 验证 PDF/Markdown 识别、非法输入、节点耗时以及未知异常包装。 |
+| `backend/tests/test_import_workflow.py` | 验证 PDF 完整路径、Markdown 跳过转换节点及无分支状态的失败行为。 |
+
+### 修改文件作用
+
+| 文件 | 本步改动 |
+| --- | --- |
+| `backend/requirements.txt` | 固定新增 `langgraph==1.2.10`。 |
+| `backend/README.md` | 说明当前工作流已实现和未实现的边界，并提供直接调用示例。 |
+| `docs/development-log.md` | 增加本步记录，并为第 1～3 步补充统一的“一句话总结”。 |
+
+### 状态设计
+
+状态字段沿用课程代码的主要命名，便于后续逐节点还原：
+
+- 任务与输入：`task_id`、`import_file_path`、`file_dir`。
+- 分支控制：`source_kind`、`is_pdf_read_enabled`、`is_md_read_enabled`。
+- 文件处理：`pdf_path`、`md_path`、`file_title`、`md_content`。
+- RAG 中间数据：`chunks`、`item_name`、`embeddings`、`milvus_ids`。
+- 可观测信息：`completed_nodes`、`node_durations_ms`。
+
+`create_import_state()` 每次深拷贝默认状态，避免一个任务修改 `chunks` 或耗时字典后污染另一个任务。
+
+### 工作流结构
+
+当前图的固定节点顺序为：
+
+```text
+START
+  ↓
+entry_node
+  ├─ PDF → pdf_to_md_node ─┐
+  └─ MD ───────────────────┤
+                           ↓
+                       md_img_node
+                           ↓
+                  document_split_node
+                           ↓
+               item_name_recognition_node
+                           ↓
+                  bge_embedding_node
+                           ↓
+                  import_milvus_node
+                           ↓
+                          END
+```
+
+`entry_node` 已经执行真实文件校验和分支选择。其余六个节点当前使用 `PendingNode`，只记录节点执行和未来职责，不读取 PDF、不生成假切片、不调用模型，也不写入数据库。
+
+### LangGraph 版本选择
+
+从官方 PyPI 元数据核对到 LangGraph 当前稳定版为 `1.2.10`，要求 Python `>=3.10`，与项目的 Python 3.10.11 兼容，因此固定直接依赖版本而不使用浮动标签。
+
+参考资料：
+
+- [LangGraph 官方 PyPI](https://pypi.org/project/langgraph/)
+- [LangGraph Graph API 官方文档](https://docs.langchain.com/oss/python/langgraph/graph-api)
+
+### Python 与虚拟环境
+
+本步所有安装、检查和测试均使用：
+
+```text
+解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+版本：Python 3.10.11
+```
+
+没有使用系统默认 Python 3.13，也没有在全局 Python 中安装 LangGraph。新增依赖安装完成后，`pip check` 返回 `No broken requirements found`。
+
+### 测试与验证
+
+最终结果：
+
+- Ruff 代码检查通过。
+- Ruff 格式检查通过，共检查 32 个 Python 文件。
+- pytest 收集 19 个测试；常规测试为 18 个通过、1 个真实基础设施测试按开关跳过。
+- 新增工作流的正常分支、错误分支和节点异常边界均被覆盖。
+- 常规测试整体覆盖率为 90%；未覆盖部分仅来自默认不连接 Docker 的旧基础设施客户端。
+- 显式开启 `RUN_INTEGRATION_TESTS=1` 后，MinIO、Milvus、MongoDB 真实集成测试通过。
+- PDF 路径按七节点顺序结束，Markdown 路径正确跳过 `pdf_to_md_node`。
+
+### 当前边界
+
+- 工作流目前只能在 Python 内直接调用，尚未暴露上传 API。
+- 只有入口节点拥有真实业务逻辑，其余节点不会伪造处理结果。
+- 尚未安装 MinerU、PyTorch 或模型，也没有下载数 GB 的模型文件。
+- 尚未修改 MinIO、Milvus 或 MongoDB 中的任何业务数据。
+
+### 下一步
+
+第 5 步将实现 `pdf_to_md_node`：先完成路径与输出目录校验、MinerU 命令构造和可测试的子进程边界，再根据本机资源决定 CPU pipeline 模型的安装与实际转换验证。
+
+### 一句话总结
+
+第 4 步把文档导入的数据契约和七节点 LangGraph 路线搭成了可运行、可追踪、可测试但不伪造业务结果的工作流骨架。
