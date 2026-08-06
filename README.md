@@ -45,6 +45,23 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps
 
 第一次启动前应修改 `.env` 中带有 `change-me` 的本地开发密码。
 
+## 后端开发
+
+后端要求 Python 3.10，并使用独立的 `backend/.venv`：
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+启动后可访问：
+
+- 健康检查：`http://localhost:8000/api/health`
+- Swagger API 文档：`http://localhost:8000/docs`
+
+首次创建虚拟环境、测试和代码检查命令见 [`backend/README.md`](backend/README.md)。
+
 ## 开发记录
 
 逐步还原过程、目录差异、文件职责和验证结果单独记录在 [`docs/development-log.md`](docs/development-log.md)，不与项目使用说明混写。

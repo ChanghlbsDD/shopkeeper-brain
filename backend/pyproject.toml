@@ -1,0 +1,32 @@
+[project]
+name = "shopkeeper-brain-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Shopkeeper Brain RAG knowledge base"
+requires-python = ">=3.10,<3.11"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+  "integration: requires the local Docker infrastructure",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

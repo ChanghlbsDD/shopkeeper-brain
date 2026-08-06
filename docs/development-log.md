@@ -246,3 +246,183 @@ Compose 验证结果：
 ### 下一步
 
 第 3 步将先准备 Python 3.10 虚拟环境，再创建 FastAPI 后端骨架、配置系统、日志、异常处理和基础设施健康检查。
+
+## 第 3 步：FastAPI 后端骨架
+
+日期：2026-08-06
+
+### 本步目标
+
+1. 安装明确版本的 Python 3.10，不使用系统默认 Python 3.13。
+2. 创建并始终使用 `backend/.venv` 独立虚拟环境。
+3. 固定运行依赖和开发依赖版本。
+4. 建立 FastAPI 应用、路由、配置、日志、异常及响应模型。
+5. 建立 MinIO、Milvus、MongoDB 基础设施客户端和健康检查。
+6. 编写单元测试与真实 Docker 基础设施集成测试。
+7. 实际启动 Uvicorn 并验证根接口、健康接口和 OpenAPI。
+
+### 与第 2 步的目录区别
+
+第 2 步结束时，后端只有职责说明：
+
+```text
+backend/
+└── README.md
+```
+
+本步完成后的后端目录：
+
+```text
+backend/
+├── .venv/                         # 本地虚拟环境，Git 忽略
+├── app/
+│   ├── api/
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   └── health.py
+│   │   ├── __init__.py
+│   │   └── router.py
+│   ├── clients/
+│   │   ├── __init__.py
+│   │   └── infrastructure.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── config.py
+│   │   ├── exceptions.py
+│   │   └── logging.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   └── health.py
+│   ├── __init__.py
+│   └── main.py
+├── tests/
+│   ├── integration/
+│   │   ├── __init__.py
+│   │   └── test_infrastructure.py
+│   ├── __init__.py
+│   ├── test_config.py
+│   ├── test_exceptions.py
+│   └── test_health_api.py
+├── pyproject.toml
+├── requirements-dev.txt
+├── requirements.txt
+└── README.md                       # 已更新为后端操作手册
+```
+
+仓库根目录还创建了本地 `.env`，它与 `.venv` 一样被 Git 忽略，不出现在 GitHub 文件树中。根目录 `.env.example` 和 `README.md` 已更新。
+
+### 新文件作用
+
+| 文件 | 作用 |
+| --- | --- |
+| `backend/requirements.txt` | 固定 FastAPI、Uvicorn、配置和三个基础设施 SDK 的运行依赖。 |
+| `backend/requirements-dev.txt` | 在运行依赖之上固定 HTTPX2、pytest、覆盖率和 Ruff。 |
+| `backend/pyproject.toml` | 限制 Python 为 3.10，并集中配置 pytest、coverage 和 Ruff。 |
+| `backend/app/__init__.py` | 将 `app` 声明为后端应用包。 |
+| `backend/app/main.py` | 创建 FastAPI 实例、注册 CORS、路由、异常处理和生命周期日志。 |
+| `backend/app/api/__init__.py` | 声明 API 包。 |
+| `backend/app/api/router.py` | 汇总后端所有 `/api` 路由。 |
+| `backend/app/api/routes/__init__.py` | 声明业务路由子包。 |
+| `backend/app/api/routes/health.py` | 实现 `/api/health`，汇总应用和基础设施状态。 |
+| `backend/app/clients/__init__.py` | 声明外部客户端包。 |
+| `backend/app/clients/infrastructure.py` | 按请求创建 MinIO、Milvus、MongoDB 客户端，执行带超时的真实连接检查。 |
+| `backend/app/core/__init__.py` | 声明核心能力包。 |
+| `backend/app/core/config.py` | 使用 Pydantic Settings 从根目录 `.env` 加载并校验配置。 |
+| `backend/app/core/exceptions.py` | 定义业务异常和统一 JSON 错误响应，避免泄漏内部错误信息。 |
+| `backend/app/core/logging.py` | 提供统一控制台日志格式和日志级别配置。 |
+| `backend/app/schemas/__init__.py` | 声明 API 模型包。 |
+| `backend/app/schemas/health.py` | 定义整体健康响应和单个组件健康状态模型。 |
+| `backend/tests/__init__.py` | 声明测试包。 |
+| `backend/tests/test_config.py` | 测试 CORS 解析和健康超时配置边界。 |
+| `backend/tests/test_exceptions.py` | 测试业务异常格式及未知异常信息隐藏。 |
+| `backend/tests/test_health_api.py` | 使用替身基础设施测试正常、降级和根接口响应。 |
+| `backend/tests/integration/__init__.py` | 声明真实基础设施集成测试包。 |
+| `backend/tests/integration/test_infrastructure.py` | 连接真实 MinIO、Milvus、MongoDB 并要求三者全部可用。 |
+
+### 本地但不提交的新增内容
+
+| 路径 | 作用 |
+| --- | --- |
+| `.env` | 保存本机运行配置和凭据，由 `.gitignore` 排除。 |
+| `backend/.venv` | 保存 Python 3.10 解释器入口和项目依赖，由 `.gitignore` 排除。 |
+
+### 修改文件作用
+
+| 文件 | 本步改动 |
+| --- | --- |
+| `.env.example` | 增加日志级别和基础设施健康检查超时模板。 |
+| `backend/README.md` | 从目录占位说明扩展为虚拟环境、安装、启动、测试和目录手册。 |
+| `README.md` | 增加面向使用者的后端启动入口；未加入开发排错流水。 |
+| `docs/development-log.md` | 记录本步目录变化、所有文件职责、问题处理和验证结果。 |
+
+### Python 与虚拟环境
+
+机器原有默认解释器为 Python 3.13.9，不符合本项目约定。通过 Python 官网下载官方 64 位 Python 3.10.11 安装器，验证结果：
+
+```text
+Authenticode 状态：Valid
+签名者：Python Software Foundation
+SHA256：D8DEDE5005564B408BA50317108B765ED9C3C510342A598F9FD42681CBE0648B
+```
+
+Python 3.10.11 安装为当前用户解释器，没有覆盖系统默认 `python`。随后使用明确路径创建虚拟环境：
+
+```text
+虚拟环境解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python 版本：3.10.11
+```
+
+验证 `sys.prefix` 指向 `backend/.venv` 且不同于 `sys.base_prefix`，确认不是系统环境伪装。
+
+### 固定依赖
+
+运行依赖：
+
+| 包 | 版本 | 用途 |
+| --- | --- | --- |
+| FastAPI | 0.141.1 | Web API 框架。 |
+| Uvicorn | 0.52.1 | ASGI 开发服务器。 |
+| Pydantic Settings | 2.14.2 | 环境变量读取与校验。 |
+| MinIO SDK | 7.2.20 | 对象存储客户端。 |
+| PyMilvus | 2.6.17 | 与 Milvus 2.6 服务端匹配的 Python SDK。 |
+| PyMongo | 4.17.0 | MongoDB 客户端。 |
+
+开发依赖：HTTPX2 2.9.1、pytest 9.1.1、pytest-cov 7.1.0、Ruff 0.16.1。
+
+直接访问官方 PyPI 时本机 TLS 连接中断，因此按课程笔记使用清华 PyPI 镜像下载；版本信息仍从官方 PyPI 元数据核对。`pip check` 确认没有损坏或冲突依赖。
+
+PyMilvus 当前默认最新版属于 3.0 系列，不能用于本项目的 Milvus 2.6，因此明确固定为可用的 2.6.17。FastAPI 当前测试栈提示旧 HTTPX 已弃用，开发依赖改用 HTTPX2。
+
+### API 骨架
+
+当前提供：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/` | 返回应用名称、版本、健康和文档路径。 |
+| GET | `/api/health` | 检查应用、MinIO、Milvus、MongoDB。 |
+| GET | `/docs` | Swagger 交互文档。 |
+| GET | `/redoc` | ReDoc 文档。 |
+| GET | `/openapi.json` | OpenAPI 规范。 |
+
+etcd 是 Milvus 的内部依赖，后端不直接访问；Milvus 健康检查成功已经覆盖其可用性链路。
+
+### 测试与验证
+
+最终结果：
+
+- Ruff 代码检查通过。
+- Ruff 格式检查通过，共检查 20 个 Python 文件。
+- pytest 共 8 个测试全部通过。
+- 真实 MinIO、Milvus、MongoDB 集成测试通过。
+- 语句覆盖率 97%。
+- `pip check` 返回 `No broken requirements found`。
+- `/api/health` 实际响应为 `ok`。
+- 健康响应确认 Python 为 3.10.11，MinIO、Milvus、MongoDB 均为 `up`。
+- OpenAPI 标题和版本正确，共公开 2 条业务路径。
+
+独立进程验收最初遇到固定测试端口被前一次 Uvicorn 子进程占用。核对命令行后只清理本次测试进程，并改用动态空闲端口完成验证。最终确认没有遗留 Uvicorn 进程和测试监听端口。
+
+### 下一步
+
+第 4 步将定义文档导入状态、节点基类与 LangGraph 工作流骨架，暂不一次性实现全部节点业务。
