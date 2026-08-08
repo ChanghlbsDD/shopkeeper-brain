@@ -7,7 +7,8 @@ from typing import Literal, cast
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from app.workflows.importing.nodes import EntryNode, PendingNode
+from app.workflows.importing.base import BaseNode
+from app.workflows.importing.nodes import EntryNode, PdfToMarkdownNode, PendingNode
 from app.workflows.importing.state import ImportGraphState, create_import_state
 
 ENTRY_NODE = "entry_node"
@@ -29,15 +30,15 @@ def route_import_file(state: ImportGraphState) -> Literal["pdf", "md"]:
     raise ValueError("入口节点没有设置可用的文件类型")
 
 
-def create_import_workflow() -> CompiledStateGraph:
+def create_import_workflow(
+    *,
+    pdf_to_md_node: BaseNode | None = None,
+) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
     graph = StateGraph(ImportGraphState)
     graph.add_node(ENTRY_NODE, EntryNode())
-    graph.add_node(
-        PDF_TO_MD_NODE,
-        PendingNode(PDF_TO_MD_NODE, "后续使用 MinerU 将 PDF 转为 Markdown"),
-    )
+    graph.add_node(PDF_TO_MD_NODE, pdf_to_md_node or PdfToMarkdownNode())
     graph.add_node(
         MD_IMAGE_NODE,
         PendingNode(MD_IMAGE_NODE, "后续处理 Markdown 图片并上传 MinIO"),

@@ -590,3 +590,176 @@ entry_node
 ### 一句话总结
 
 第 4 步把文档导入的数据契约和七节点 LangGraph 路线搭成了可运行、可追踪、可测试但不伪造业务结果的工作流骨架。
+
+## 第 5 步：MinerU PDF 转 Markdown 节点
+
+日期：2026-08-08
+
+### 本步目标
+
+1. 在项目的 Python 3.10 虚拟环境中安装 MinerU pipeline 依赖。
+2. 把 `pdf_to_md_node` 从占位节点替换为真实业务节点。
+3. 校验 PDF、输出目录、子进程退出码、超时和生成文件。
+4. 让 MinerU 命令边界可替换，单元测试不下载模型也不运行推理。
+5. 兼容 Windows 中文项目路径，并完成一次课程 PDF 的真实转换。
+6. 保证模型、转换产物和用户文档都不进入 Git。
+
+### 与第 4 步的目录区别
+
+第 4 步结束时，PDF 分支仍由 `PendingNode` 记录流程经过。本步新增一个真实节点、一个仅供 MinerU 子进程使用的兼容文件和一组专项测试：
+
+```text
+backend/
+├── app/
+│   └── workflows/
+│       └── importing/
+│           ├── mineru_compat/
+│           │   └── sitecustomize.py
+│           └── nodes/
+│               └── pdf_to_md.py
+└── tests/
+    └── test_pdf_to_md_node.py
+```
+
+以下已有文件也发生了修改：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   ├── README.md
+│   └── requirements.txt
+└── docs/development-log.md
+```
+
+真实验收还在 Git 忽略目录生成了 `models/` 和 `runtime/mineru-step5/`；它们属于本机运行数据，不是项目源码，因此不出现在提交目录中。
+
+### 新文件作用
+
+| 文件 | 作用 |
+| --- | --- |
+| `backend/app/workflows/importing/nodes/pdf_to_md.py` | 实现 PDF 路径和输出目录校验、MinerU 命令构造、无 shell 子进程调用、超时和退出码处理、Markdown 定位及状态更新。 |
+| `backend/app/workflows/importing/mineru_compat/sitecustomize.py` | 仅在 MinerU 子进程中把 FastText 内置模型改为相对路径，绕开 Windows 原生 FastText 无法读取中文虚拟环境路径的问题。 |
+| `backend/tests/test_pdf_to_md_node.py` | 用临时文件和可替换执行器验证命令、环境变量、标准与兼容输出目录、非法输入、失败退出、缺少产物和超时。 |
+
+### 修改文件作用
+
+| 文件 | 本步改动 |
+| --- | --- |
+| `.env.example` | 增加 MinerU 后端、超时和仓库内模型缓存默认值。 |
+| `backend/app/core/config.py` | 增加 MinerU backend、模型来源、超时、ModelScope 和 Hugging Face 缓存配置及取值校验。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增可识别的 `PdfConversionError`。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `PdfToMarkdownNode` 替换 PDF 占位节点，并允许测试注入替代节点。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 公开导出 `PdfToMarkdownNode`。 |
+| `backend/requirements.txt` | 固定新增 `mineru[pipeline]==3.4.4`。 |
+| `backend/tests/test_config.py` | 增加 MinerU backend 和超时配置校验。 |
+| `backend/tests/test_import_workflow.py` | PDF 路径改用模拟 MinerU 执行器走完整图，并确认真实写回 Markdown 路径。 |
+| `backend/README.md` | 增加 MinerU 配置、模型缓存、中文路径兼容说明和 PDF 调用示例。 |
+| `docs/development-log.md` | 增加第 5 步的实现、目录差异、文件职责和验证记录。 |
+
+### 节点执行过程
+
+`PdfToMarkdownNode` 按四段执行：
+
+1. 必须从状态中取得一个真实存在的 `.pdf` 文件，并确认 `file_dir` 是目录或可创建目录。
+2. 构造 `mineru -p <PDF> -o <目录> -b pipeline` 参数列表，以 `shell=False` 的方式执行。
+3. 对命令不存在、运行超时和非零退出码分别抛出带节点名的可识别异常。
+4. 优先查找 `<输出目录>/<文档名>/auto/<文档名>.md`；若 MinerU 小版本改变中间目录，则在该文档目录下接受唯一同名 Markdown。
+
+转换成功后，节点写入绝对 `md_path` 并设置 `is_md_read_enabled=True`。耗时和节点完成顺序继续由第 4 步的 `BaseNode` 统一记录。
+
+### 为什么测试不直接运行 MinerU
+
+MinerU 首次使用需要下载约 GB 级模型，CPU 推理也远慢于普通单元测试。节点因此接收一个可替换的命令执行函数：
+
+- 生产运行使用真实 `subprocess.run`。
+- 单元测试用临时执行器检查完整命令和环境变量，并在临时目录创建预期产物。
+- 另做一次真实验收覆盖模型下载和推理链路。
+
+这样既验证了业务边界，也避免每次 `pytest` 都重新进行昂贵推理。
+
+### Windows 中文路径兼容
+
+第一次真实转换失败在 `fast_langdetect` 的原生 FastText 加载器：Python 能找到模型，但原生库打开包含“掌柜智库”的绝对路径时把中文转成乱码。
+
+本步没有改名项目、没有重建虚拟环境，也没有恢复之前删除的英文项目入口。节点只在 Windows、内置 FastText 模型确实位于非 ASCII 路径时执行以下局部处理：
+
+1. 仅向 MinerU 子进程的 `PYTHONPATH` 加入 `mineru_compat`。
+2. 让子进程以 FastText 资源目录作为工作目录。
+3. 用 `sitecustomize.py` 把模型位置改为纯英文相对文件名 `lid.176.ftz`。
+
+第二次真实转换成功，其他 Python 进程和其他操作系统不会启用该补丁。
+
+### 依赖与配置
+
+本步固定使用 MinerU `3.4.4`，其当前 CLI 已实际核对支持：
+
+```text
+mineru -p <input> -o <output> -b pipeline
+```
+
+课程旧命令中的 `--source local` 没有继续硬编码；当前版本通过 `MINERU_MODEL_SOURCE` 环境变量选择 `modelscope`、`huggingface` 或 `local`。默认使用 ModelScope，并把模型放在已忽略的项目目录：
+
+```dotenv
+MINERU_BACKEND=pipeline
+MINERU_MODEL_SOURCE=modelscope
+MINERU_TIMEOUT_SECONDS=1800
+MODELSCOPE_CACHE=models/modelscope
+HF_HOME=models/huggingface
+```
+
+参考资料：
+
+- [MinerU 官方中文 README](https://github.com/opendatalab/MinerU/blob/master/README_zh-CN.md)
+- [MinerU 官方 CLI 文档](https://github.com/opendatalab/MinerU/blob/master/docs/en/usage/cli_tools.md)
+- [MinerU 官方 PyPI](https://pypi.org/project/mineru/)
+
+### Python 与虚拟环境
+
+本步所有安装、检查、单元测试和真实转换均使用：
+
+```text
+解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+版本：Python 3.10.11
+MinerU：3.4.4
+PyTorch：2.13.0+cpu
+```
+
+没有使用系统 Python 3.13，也没有把 MinerU 或 PyTorch 安装到全局环境。依赖安装约耗时 5 分 53 秒，中途一次下载中断后由 pip 自动续传完成，`pip check` 最终没有发现冲突。
+
+### 测试与真实验证
+
+最终结果：
+
+- Ruff 代码检查通过。
+- Ruff 格式检查通过，共检查 35 个 Python 文件。
+- pytest 收集 29 个测试；28 个通过，1 个真实基础设施测试按开关跳过。
+- 额外尝试显式运行旧基础设施集成测试时，确认 Docker Desktop 引擎未启动，三个本地端口均拒绝连接；本步不依赖这些服务，因此没有为了验收 MinerU 而启动容器。
+- 常规测试总覆盖率为 88%，`pdf_to_md.py` 覆盖率为 83%。
+- `pip check` 返回 `No broken requirements found`。
+- MinerU CLI 版本为 `3.4.4`，实际参数与节点命令一致。
+- 使用课程文件 `hak180产品安全手册.pdf` 真实转换成功，PDF 节点耗时约 44.9 秒。
+- 生成的 Markdown 为 14,790 字节，开头正确识别出“HAK 180 烫金机”“产品安全手册（简体中文）”等正文。
+- 真实转换生成 16 个输出文件，共约 4.27 MB。
+- 本机项目缓存 15 个模型文件，共约 1.08 GB；`models/` 和 `runtime/` 均被 Git 忽略。
+
+### 当前边界
+
+- 入口节点和 PDF 转 Markdown 节点已经执行真实业务，其余五个导入节点仍是占位节点。
+- 当前安装的是 CPU 版 PyTorch；可以正确转换，但大型 PDF 会明显更慢。
+- 工作流仍未暴露为上传 HTTP API。
+- 本步没有启动新的 Docker 容器，也没有向 MinIO、Milvus 或 MongoDB 写入业务数据。
+
+### 下一步
+
+第 6 步将实现 `md_img_node`：读取 MinerU Markdown 中的本地图片引用，上传图片到 MinIO，并把 Markdown 图片地址替换为可访问的对象地址。
+
+### 一句话总结
+
+第 5 步在项目 Python 3.10 虚拟环境中接通了可测试、可追踪且能兼容 Windows 中文路径的真实 MinerU PDF 转 Markdown 节点。

@@ -1,6 +1,7 @@
 fastapi==0.141.1
 langgraph==1.2.10
 minio==7.2.20
+mineru[pipeline]==3.4.4
 pydantic-settings==2.14.2
 pymilvus==2.6.17
 pymongo==4.17.0

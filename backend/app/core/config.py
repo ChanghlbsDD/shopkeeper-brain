@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -37,6 +38,12 @@ class Settings(BaseSettings):
         "mongodb://shopkeeper:shopkeeper-mongo-change-me@localhost:27017/?authSource=admin"
     )
     mongo_db_name: str = "shopkeeper_brain"
+
+    mineru_backend: Literal["pipeline"] = "pipeline"
+    mineru_model_source: Literal["modelscope", "huggingface", "local"] = "modelscope"
+    mineru_timeout_seconds: int = Field(default=1800, gt=0, le=7200)
+    modelscope_cache: str = "models/modelscope"
+    hf_home: str = "models/huggingface"
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -29,3 +29,7 @@ class ImportValidationError(ImportWorkflowError):
 
 class ImportNodeError(ImportWorkflowError):
     """节点执行时发生未预期错误。"""
+
+
+class PdfConversionError(ImportWorkflowError):
+    """MinerU 无法把 PDF 转换为 Markdown。"""

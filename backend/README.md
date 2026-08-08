@@ -1,6 +1,6 @@
 # Backend
 
-掌柜智库后端使用 Python 3.10、FastAPI 和 Pydantic Settings。当前骨架提供统一配置、日志、异常响应、基础设施客户端及健康检查。
+掌柜智库后端使用 Python 3.10、FastAPI 和 Pydantic Settings。当前提供统一配置、日志、异常响应、基础设施客户端、健康检查，以及基于 LangGraph 的文档导入流程。
 
 ## 创建虚拟环境
 
@@ -50,17 +50,32 @@ $env:RUN_INTEGRATION_TESTS='1'
 Remove-Item Env:RUN_INTEGRATION_TESTS
 ```
 
-## 文档导入工作流骨架
+## PDF 转 Markdown
 
-当前已建立 PDF/Markdown 导入的 LangGraph 流程骨架。入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 转 Markdown、图片处理、文档切分、商品名识别、向量化和 Milvus 写入节点目前只记录执行顺序，后续步骤会逐个替换为真实业务。
+项目使用 MinerU `pipeline` 后端把 PDF 转为 Markdown。安装开发依赖时会一并安装 `mineru[pipeline]`，首次转换还会下载解析模型；模型缓存目录应留在仓库的 `models/` 下，该目录不会提交到 Git：
+
+```dotenv
+MINERU_BACKEND=pipeline
+MINERU_MODEL_SOURCE=modelscope
+MINERU_TIMEOUT_SECONDS=1800
+MODELSCOPE_CACHE=models/modelscope
+HF_HOME=models/huggingface
+```
+
+在 Windows 中，即使项目路径含中文，节点也会为 MinerU 的 FastText 语言检测模型启用局部兼容处理，不需要额外创建英文项目目录。
+
+## 文档导入工作流
+
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会真实调用 MinerU 并写入生成的 Markdown 路径。图片处理、文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
 ```python
 from app.workflows.importing import run_import_workflow
 
-result = run_import_workflow(r"D:\docs\manual.md")
+result = run_import_workflow(r"D:\docs\manual.pdf", file_dir=r"D:\docs\output")
 print(result["completed_nodes"])
+print(result["md_path"])
 ```
 
 ## 目录职责
