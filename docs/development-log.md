@@ -763,3 +763,177 @@ PyTorch：2.13.0+cpu
 ### 一句话总结
 
 第 5 步在项目 Python 3.10 虚拟环境中接通了可测试、可追踪且能兼容 Windows 中文路径的真实 MinerU PDF 转 Markdown 节点。
+
+## 第 5 步调整：MinerU 改用云端 API
+
+日期：2026-08-08
+
+### 调整原因
+
+准备部署的服务器只有 2 核 CPU、2 GiB 内存和 40 GiB 系统盘，不适合同时承载 MinerU 本地模型和项目基础设施。根据部署资源决定保留 PDF 转 Markdown 能力，但把计算迁移到 MinerU 精准解析云端 API。
+
+这次是对第 5 步实现方式的调整，不提前进入第 6 步。第 5 步原记录保留，用于说明为什么曾安装本地模型以及最终为什么切换架构。
+
+### 与调整前的目录区别
+
+新增云端 API 客户端和专项测试：
+
+```text
+backend/
+├── app/
+│   └── clients/
+│       └── mineru_api.py
+└── tests/
+    └── test_mineru_api_client.py
+```
+
+删除只服务于本地模型的兼容文件：
+
+```text
+backend/app/workflows/importing/mineru_compat/sitecustomize.py
+```
+
+修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/nodes/pdf_to_md.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   ├── tests/test_pdf_to_md_node.py
+│   ├── README.md
+│   └── requirements.txt
+└── docs/development-log.md
+```
+
+本机还删除并重建了忽略目录中的虚拟环境，删除了下载模型和真实验收产物；这些目录原本不受 Git 管理，因此不会显示为 Git 文件删除。
+
+### 新文件作用
+
+| 文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/mineru_api.py` | 封装 MinerU 精准解析 API 的签名地址申请、PDF 流式上传、任务轮询、ZIP 流式下载、安全解压和 Markdown 定位。 |
+| `backend/tests/test_mineru_api_client.py` | 使用内存模拟 HTTP 服务验证上传、轮询、下载、任务失败、业务错误和 ZIP 路径越界防护，不消耗真实 API 次数。 |
+
+### 删除文件作用
+
+| 文件 | 删除原因 |
+| --- | --- |
+| `backend/app/workflows/importing/mineru_compat/sitecustomize.py` | 该文件只用于解决本地 FastText 模型读取 Windows 中文路径的问题；改用云端 API 后不再启动本地模型子进程。 |
+
+### 修改文件作用
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 删除本地 backend、模型来源和模型缓存变量，增加 API 地址、Token、云端模型版本、请求超时、轮询间隔和任务超时。 |
+| `backend/app/core/config.py` | 用 MinerU API 配置替换本地模型配置，并限制云端模型为 `pipeline` 或 `vlm`。 |
+| `backend/app/workflows/importing/nodes/pdf_to_md.py` | 删除命令行、子进程和中文路径兼容逻辑，改为校验输入后调用 API 客户端并写回 `full.md` 路径。 |
+| `backend/requirements.txt` | 删除 `mineru[pipeline]==3.4.4`，明确增加轻量 HTTP 客户端 `httpx==0.28.1`。 |
+| `backend/tests/test_config.py` | 改为验证 API 云端模型版本和任务超时。 |
+| `backend/tests/test_import_workflow.py` | 完整 PDF 工作流改为注入模拟 API 转换器。 |
+| `backend/tests/test_pdf_to_md_node.py` | 改为验证 API 转换器调用、路径校验、API 错误包装和缺少结果文件。 |
+| `backend/README.md` | 改写 PDF 转换配置、Token 准备、数据上传说明和官方接口限制。 |
+| `docs/development-log.md` | 保留原第 5 步历史，并新增本次架构调整记录。 |
+
+### API 执行流程
+
+当前 `PdfToMarkdownNode` 不再运行 `mineru` 命令，而是调用 `MinerUApiClient`：
+
+```text
+本地 PDF
+  ↓ POST /file-urls/batch
+申请 batch_id 和签名上传地址
+  ↓ PUT 签名地址
+流式上传 PDF
+  ↓ GET /extract-results/batch/{batch_id}
+轮询 waiting-file / pending / running / converting
+  ↓ state=done
+下载 full_zip_url
+  ↓
+安全解压 full.md、JSON 和 images
+  ↓
+把 full.md 绝对路径写回 LangGraph 状态
+```
+
+任务返回 `failed`、未知状态、超时、HTTP 错误或无结果文件时，都会转换为带 `pdf_to_md_node` 节点名的 `PdfConversionError`。
+
+### 文件与安全处理
+
+- PDF 和 ZIP 都采用流式传输，不把大文件整体读入内存，适合小内存服务器。
+- ZIP 先写入输出目录中的临时文件，处理结束后无论成功失败都会删除。
+- 解压前拒绝符号链接和 `../` 路径，防止压缩包把文件写到输出目录之外。
+- API Token 只允许写入被 Git 忽略的本机 `.env`，示例配置保持空值。
+- 使用云端 API 意味着 PDF 会发送到 MinerU 服务，需要接受其数据处理与额度规则。
+
+### 本机清理结果
+
+删除前：
+
+- `models/`：15 个 MinerU 模型文件，约 1.08 GB。
+- `runtime/mineru-step5/`：16 个真实验收文件，约 4.27 MB。
+- `backend/.venv`：约 1.26 GB，包含 MinerU、PyTorch、ONNX Runtime 等依赖。
+
+删除并按新依赖重建后：
+
+- `models/` 已删除。
+- `runtime/` 已删除；后续真实任务会按需重新创建输出目录。
+- `mineru_compat/` 已删除。
+- 新 `backend/.venv` 约 249 MB。
+- 虚拟环境确认 `mineru` 和 `torch` 均未安装，`httpx` 已安装。
+- 本次合计释放约 2.09 GB 本机磁盘空间。
+
+首次从 PyPI 重建依赖时连续遇到 TLS 连接中断，最终使用阿里云 PyPI 镜像安装相同的固定版本；依赖完整性由 `pip check` 再次确认。
+
+### API 配置
+
+公开配置模板为：
+
+```dotenv
+MINERU_API_TOKEN=
+MINERU_BASE_URL=https://mineru.net/api/v4
+MINERU_MODEL_VERSION=vlm
+MINERU_REQUEST_TIMEOUT_SECONDS=120
+MINERU_POLL_INTERVAL_SECONDS=2
+MINERU_TASK_TIMEOUT_SECONDS=1800
+```
+
+Token 需要用户在 [MinerU API 管理页面](https://mineru.net/apiManage/token)自行创建后，只写入仓库根目录 `.env`。本次没有 Token，因此没有发送真实 PDF，没有产生 API 调用或费用。
+
+官方精准解析接口当前支持 `pipeline`、`vlm` 和 `MinerU-HTML`；本项目处理 PDF，默认使用官方推荐的 `vlm`。单个文件限制为不超过 200 MB、200 页，结果 ZIP 包含 Markdown、JSON 和图片。
+
+参考资料：
+
+- [MinerU 官方 API 文档](https://mineru.net/apiManage/docs)
+- [课程环境配置与服务部署指南](D:/study/尚硅谷/掌柜智库项目/day09_MongDB_Milvus_查询流程骨架_商品名确认节点开始/笔记/课件全量最新/02_掌柜智库项目环境配置&服务部署指南.md)
+
+### 测试与验证
+
+当前验证结果：
+
+- 所有检查均使用 `backend/.venv` 中的 Python 3.10.11。
+- Ruff 代码检查通过。
+- Ruff 格式检查通过，共检查 36 个 Python 文件。
+- pytest 收集 33 个测试；32 个通过，1 个 Docker 基础设施测试按开关跳过。
+- 总覆盖率为 86%；`pdf_to_md.py` 为 94%，`mineru_api.py` 为 76%。
+- `pip check` 返回 `No broken requirements found`。
+- 模拟 API 已验证上传、运行中轮询、成功下载、图片保留、业务错误、任务失败、任务超时和不安全 ZIP 拒绝。
+- 没有使用真实 Token进行端到端 API 验收。
+
+### 当前边界
+
+- 服务器不需要 MinerU、PyTorch 或 1.08 GB PDF 解析模型，但每次解析需要访问 MinerU 云端服务。
+- API 可用性、速度、额度和费用由 MinerU 平台决定。
+- PDF 会离开业务服务器并上传到第三方服务。
+- 入口节点和 PDF 转 Markdown 节点已经实现；其余五个导入节点仍为占位节点。
+- Docker Desktop 当前未启动，本次调整不依赖 Docker。
+
+### 下一步
+
+第 6 步仍将实现 `md_img_node`：读取 API 结果 Markdown 中的本地图片引用，上传图片到 MinIO，并替换为可访问的对象地址。
+
+### 一句话总结
+
+第 5 步调整把 PDF 解析从本地重模型迁移为安全可测试的 MinerU 云端 API，并清除了约 2.09 GB 不再需要的本机文件。

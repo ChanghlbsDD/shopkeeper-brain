@@ -39,11 +39,12 @@ class Settings(BaseSettings):
     )
     mongo_db_name: str = "shopkeeper_brain"
 
-    mineru_backend: Literal["pipeline"] = "pipeline"
-    mineru_model_source: Literal["modelscope", "huggingface", "local"] = "modelscope"
-    mineru_timeout_seconds: int = Field(default=1800, gt=0, le=7200)
-    modelscope_cache: str = "models/modelscope"
-    hf_home: str = "models/huggingface"
+    mineru_api_token: str = ""
+    mineru_base_url: str = "https://mineru.net/api/v4"
+    mineru_model_version: Literal["pipeline", "vlm"] = "vlm"
+    mineru_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
+    mineru_poll_interval_seconds: float = Field(default=2, gt=0, le=60)
+    mineru_task_timeout_seconds: int = Field(default=1800, gt=0, le=7200)
 
     @property
     def cors_origin_list(self) -> list[str]:

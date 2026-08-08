@@ -1,9 +1,8 @@
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from app.core.config import REPOSITORY_ROOT
+from app.clients.mineru_api import MinerUApiError
 from app.workflows.importing.exceptions import ImportValidationError, PdfConversionError
 from app.workflows.importing.nodes import EntryNode, PdfToMarkdownNode
 from app.workflows.importing.state import create_import_state
@@ -17,55 +16,25 @@ def create_pdf_state(tmp_path: Path):
     return pdf_path, output_directory, state
 
 
-def test_pdf_to_markdown_runs_pipeline_and_updates_state(tmp_path: Path) -> None:
+def test_pdf_to_markdown_calls_api_converter_and_updates_state(tmp_path: Path) -> None:
     pdf_path, output_directory, state = create_pdf_state(tmp_path)
     calls = []
 
-    def successful_runner(command, environment, timeout):
-        calls.append((list(command), dict(environment), timeout))
-        markdown_path = output_directory / pdf_path.stem / "auto" / f"{pdf_path.stem}.md"
+    def successful_converter(source: Path, destination: Path) -> Path:
+        calls.append((source, destination))
+        markdown_path = destination / source.stem / "auto" / "full.md"
         markdown_path.parent.mkdir(parents=True)
         markdown_path.write_text("# 商品说明", encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, "converted", "")
+        return markdown_path
 
-    result = PdfToMarkdownNode(
-        runner=successful_runner,
-        executable="mineru-test",
-    )(state)
+    result = PdfToMarkdownNode(converter=successful_converter)(state)
 
-    command, environment, timeout = calls[0]
-    assert command == [
-        "mineru-test",
-        "-p",
-        str(pdf_path.resolve()),
-        "-o",
-        str(output_directory.resolve()),
-        "-b",
-        "pipeline",
-    ]
-    assert environment["MINERU_MODEL_SOURCE"] == "modelscope"
-    assert Path(environment["MODELSCOPE_CACHE"]) == (REPOSITORY_ROOT / "models/modelscope")
-    assert Path(environment["HF_HOME"]) == (REPOSITORY_ROOT / "models/huggingface")
-    assert timeout == 1800
+    assert calls == [(pdf_path.resolve(), output_directory.resolve())]
     assert result["md_path"] == str(
-        (output_directory / pdf_path.stem / "auto" / f"{pdf_path.stem}.md").resolve()
+        (output_directory / pdf_path.stem / "auto" / "full.md").resolve()
     )
     assert result["is_md_read_enabled"] is True
     assert result["completed_nodes"][-1] == "pdf_to_md_node"
-
-
-def test_pdf_to_markdown_accepts_changed_output_subdirectory(tmp_path: Path) -> None:
-    pdf_path, output_directory, state = create_pdf_state(tmp_path)
-
-    def successful_runner(command, _environment, _timeout):
-        markdown_path = output_directory / pdf_path.stem / "custom" / f"{pdf_path.stem}.md"
-        markdown_path.parent.mkdir(parents=True)
-        markdown_path.write_text("# Converted", encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    result = PdfToMarkdownNode(runner=successful_runner, executable="mineru-test")(state)
-
-    assert Path(result["md_path"]).parent.name == "custom"
 
 
 @pytest.mark.parametrize(
@@ -78,7 +47,7 @@ def test_pdf_to_markdown_accepts_changed_output_subdirectory(tmp_path: Path) -> 
 )
 def test_pdf_to_markdown_rejects_invalid_pdf_state(state, message: str) -> None:
     with pytest.raises(ImportValidationError, match=message):
-        PdfToMarkdownNode(executable="mineru-test")(state)
+        PdfToMarkdownNode()(state)
 
 
 def test_pdf_to_markdown_rejects_file_as_output_directory(tmp_path: Path) -> None:
@@ -88,36 +57,24 @@ def test_pdf_to_markdown_rejects_file_as_output_directory(tmp_path: Path) -> Non
     output_path.write_text("file", encoding="utf-8")
 
     with pytest.raises(ImportValidationError, match="输出路径不是目录"):
-        PdfToMarkdownNode(executable="mineru-test")(
-            {"pdf_path": str(pdf_path), "file_dir": str(output_path)}
-        )
+        PdfToMarkdownNode()({"pdf_path": str(pdf_path), "file_dir": str(output_path)})
 
 
-def test_pdf_to_markdown_reports_nonzero_exit(tmp_path: Path) -> None:
+def test_pdf_to_markdown_wraps_api_error(tmp_path: Path) -> None:
     _pdf_path, _output_directory, state = create_pdf_state(tmp_path)
 
-    def failed_runner(command, _environment, _timeout):
-        return subprocess.CompletedProcess(command, 2, "", "model failed")
+    def failed_converter(_source: Path, _destination: Path) -> Path:
+        raise MinerUApiError("远程服务繁忙")
 
-    with pytest.raises(PdfConversionError, match="退出码 2.*model failed"):
-        PdfToMarkdownNode(runner=failed_runner, executable="mineru-test")(state)
-
-
-def test_pdf_to_markdown_reports_missing_output(tmp_path: Path) -> None:
-    _pdf_path, _output_directory, state = create_pdf_state(tmp_path)
-
-    def no_output_runner(command, _environment, _timeout):
-        return subprocess.CompletedProcess(command, 0, "done", "")
-
-    with pytest.raises(PdfConversionError, match="没有找到生成的 Markdown"):
-        PdfToMarkdownNode(runner=no_output_runner, executable="mineru-test")(state)
+    with pytest.raises(PdfConversionError, match="远程服务繁忙"):
+        PdfToMarkdownNode(converter=failed_converter)(state)
 
 
-def test_pdf_to_markdown_reports_timeout(tmp_path: Path) -> None:
-    _pdf_path, _output_directory, state = create_pdf_state(tmp_path)
+def test_pdf_to_markdown_rejects_missing_api_output(tmp_path: Path) -> None:
+    _pdf_path, output_directory, state = create_pdf_state(tmp_path)
 
-    def timeout_runner(command, _environment, timeout):
-        raise subprocess.TimeoutExpired(command, timeout)
+    def missing_output_converter(_source: Path, _destination: Path) -> Path:
+        return output_directory / "missing.md"
 
-    with pytest.raises(PdfConversionError, match="转换超过 1800 秒"):
-        PdfToMarkdownNode(runner=timeout_runner, executable="mineru-test")(state)
+    with pytest.raises(PdfConversionError, match="没有生成 Markdown"):
+        PdfToMarkdownNode(converter=missing_output_converter)(state)

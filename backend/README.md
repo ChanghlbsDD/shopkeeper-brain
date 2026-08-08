@@ -52,21 +52,24 @@ Remove-Item Env:RUN_INTEGRATION_TESTS
 
 ## PDF 转 Markdown
 
-项目使用 MinerU `pipeline` 后端把 PDF 转为 Markdown。安装开发依赖时会一并安装 `mineru[pipeline]`，首次转换还会下载解析模型；模型缓存目录应留在仓库的 `models/` 下，该目录不会提交到 Git：
+项目通过 MinerU 精准解析云端 API 把 PDF 转为 Markdown，不在本机或业务服务器安装 MinerU、PyTorch 和解析模型。先在 [MinerU API 管理页面](https://mineru.net/apiManage/token)创建 Token，再把 Token 写入仓库根目录的本机 `.env`：
 
 ```dotenv
-MINERU_BACKEND=pipeline
-MINERU_MODEL_SOURCE=modelscope
-MINERU_TIMEOUT_SECONDS=1800
-MODELSCOPE_CACHE=models/modelscope
-HF_HOME=models/huggingface
+MINERU_API_TOKEN=只填写在本机
+MINERU_BASE_URL=https://mineru.net/api/v4
+MINERU_MODEL_VERSION=vlm
+MINERU_REQUEST_TIMEOUT_SECONDS=120
+MINERU_POLL_INTERVAL_SECONDS=2
+MINERU_TASK_TIMEOUT_SECONDS=1800
 ```
 
-在 Windows 中，即使项目路径含中文，节点也会为 MinerU 的 FastText 语言检测模型启用局部兼容处理，不需要额外创建英文项目目录。
+节点会依次申请签名上传地址、上传 PDF、轮询任务、下载完整 ZIP，并把 Markdown、JSON 和图片安全解压到指定输出目录。API Token 不得写入 `.env.example` 或提交到 Git。
+
+使用云端 API 表示 PDF 会上传给 MinerU 服务。当前精准解析接口对单文件限制为不超过 200 MB、200 页，并受账号额度约束；具体规则以 [MinerU 官方 API 文档](https://mineru.net/apiManage/docs)为准。
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会真实调用 MinerU 并写入生成的 Markdown 路径。图片处理、文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径。图片处理、文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 

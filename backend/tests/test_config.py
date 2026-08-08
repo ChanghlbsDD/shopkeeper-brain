@@ -25,14 +25,14 @@ def test_health_timeout_must_be_positive() -> None:
         Settings(_env_file=None, infra_health_timeout_seconds=0)
 
 
-def test_mineru_timeout_and_backend_are_validated() -> None:
-    settings = Settings(_env_file=None, mineru_timeout_seconds=60)
+def test_mineru_timeout_and_model_version_are_validated() -> None:
+    settings = Settings(_env_file=None, mineru_task_timeout_seconds=60)
 
-    assert settings.mineru_backend == "pipeline"
-    assert settings.mineru_timeout_seconds == 60
-
-    with pytest.raises(ValidationError):
-        Settings(_env_file=None, mineru_timeout_seconds=0)
+    assert settings.mineru_model_version == "vlm"
+    assert settings.mineru_task_timeout_seconds == 60
 
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, mineru_backend="unsupported")
+        Settings(_env_file=None, mineru_task_timeout_seconds=0)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, mineru_model_version="unsupported")
