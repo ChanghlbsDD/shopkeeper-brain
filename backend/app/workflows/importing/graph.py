@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.workflows.importing.base import BaseNode
 from app.workflows.importing.nodes import (
+    BgeEmbeddingNode,
     DocumentSplitNode,
     EntryNode,
     ItemNameRecognitionNode,
@@ -43,6 +44,7 @@ def create_import_workflow(
     md_image_node: BaseNode | None = None,
     document_split_node: BaseNode | None = None,
     item_name_node: BaseNode | None = None,
+    embedding_node: BaseNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
@@ -52,10 +54,7 @@ def create_import_workflow(
     graph.add_node(MD_IMAGE_NODE, md_image_node or MarkdownImageNode())
     graph.add_node(DOCUMENT_SPLIT_NODE, document_split_node or DocumentSplitNode())
     graph.add_node(ITEM_NAME_NODE, item_name_node or ItemNameRecognitionNode())
-    graph.add_node(
-        EMBEDDING_NODE,
-        PendingNode(EMBEDDING_NODE, "后续生成 BGE-M3 稠密和稀疏向量"),
-    )
+    graph.add_node(EMBEDDING_NODE, embedding_node or BgeEmbeddingNode())
     graph.add_node(
         MILVUS_NODE,
         PendingNode(MILVUS_NODE, "后续将文档片段和向量写入 Milvus"),

@@ -45,3 +45,7 @@ class DocumentSplitError(ImportWorkflowError):
 
 class ItemNameRecognitionError(ImportWorkflowError):
     """通义千问无法从文档片段中识别有效商品名称。"""
+
+
+class EmbeddingError(ImportWorkflowError):
+    """百炼无法为文档片段生成有效混合向量。"""

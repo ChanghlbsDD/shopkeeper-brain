@@ -11,6 +11,7 @@ __pycache__/
 *$py.class
 .Python
 .venv/
+.python310/
 venv/
 env/
 .pytest_cache/
@@ -63,3 +64,4 @@ test-results/
 *.log
 *.tmp
 *_chunks.json
+*_vectors.json

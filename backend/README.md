@@ -69,7 +69,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段。向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段；向量化节点会调用百炼云端 API 生成稠密和稀疏向量。Milvus 写入节点目前仍只记录执行顺序，将在下一步替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
@@ -137,6 +137,26 @@ ITEM_NAME_BACKUP_ENABLED=true
 节点最多选取前 3 个 chunk，并把上下文严格限制在 2500 字符以内。模型返回的 `item_name` 会写入工作流状态和每个 chunk，同时通过 `item_name_source` 标记来源是 `qwen` 还是 `file_title_fallback`。只有模型明确返回 `UNKNOWN` 时才使用文件名降级；密钥缺失、HTTP 错误或 JSON 格式错误会终止节点，避免把错误结果当成真实商品名。
 
 默认会在 Markdown 旁生成 `*_item_name_chunks.json` 供开发检查，该文件已被 Git 忽略。商品名识别会把文档标题和少量正文发送到阿里云百炼；处理敏感文档前需要确认数据合规要求。不同地域的 API 地址可能不同，部署时应按[阿里云百炼官方文档](https://help.aliyun.com/zh/model-studio/qwen-structured-output)调整 `OPENAI_API_BASE`。
+
+## 百炼云端混合向量
+
+课程原版使用本地 BGE-M3 生成稠密和稀疏向量。考虑到目标服务器只有 2 核、2 GiB 内存，本项目改用百炼 `text-embedding-v4` 原生 HTTP 接口，同时请求 `dense&sparse`，不下载或加载本地向量模型。
+
+```dotenv
+DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/api/v1
+DASHSCOPE_API_KEY=只填写在本机
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSION=1024
+EMBEDDING_BATCH_SIZE=10
+EMBEDDING_REQUEST_TIMEOUT_SECONDS=60
+EMBEDDING_BACKUP_ENABLED=true
+```
+
+节点保留课程中的名称 `bge_embedding_node`，但该名称只用于流程对应关系。它把每个 chunk 组装成“商品名称 + 正文”，按最多 10 条一批发送，并显式使用底库文本类型 `document`。返回结果会写入每个 chunk 的 `dense_vector` 和 `sparse_vector`，同时把稠密向量列表写入 `state.embeddings`。
+
+默认会在 Markdown 旁生成 `*_vectors.json` 供开发检查，该文件和本地 Python 运行时目录均已被 Git 忽略。API Key 缺失、HTTP 失败、数量不一致、1024 维校验失败或稀疏向量缺失都会终止节点，防止不完整向量进入 Milvus。
+
+同一份知识库在入库和查询时必须使用相同模型及维度；后续查询节点会用 `query` 类型生成查询向量。向量化会把商品名称和全部切片正文发送给阿里云百炼，处理敏感文档前需要确认数据合规要求。接口限制和可选维度以[百炼同步向量接口文档](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api)为准。
 
 ## 目录职责
 

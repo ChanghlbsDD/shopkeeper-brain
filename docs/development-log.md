@@ -1408,3 +1408,179 @@ pip check：No broken requirements found
 ### 一句话总结
 
 第 8 步用轻量、安全且经过真实调用验证的通义千问 JSON 接口识别商品全名，并把可信来源标记和名称写回了全部知识片段。
+
+## 第 9 步：百炼云端混合向量生成
+
+日期：2026-08-08
+
+### 本步目标
+
+把 `bge_embedding_node` 从占位节点替换为真实业务节点，为每个知识片段生成 Milvus 混合检索需要的稠密向量和稀疏向量。
+
+课程使用本地 BGE-M3。结合目标服务器只有 2 核、2 GiB 内存，以及前面已经确定的“AI 推理优先走 API”部署原则，本项目改用阿里云百炼 `text-embedding-v4` 原生 HTTP 接口。该接口能够在一次请求中返回 `dense&sparse`，因此没有牺牲课程中的混合检索结构，也不需要服务器下载或常驻加载本地向量模型。
+
+### 与上一步的目录区别
+
+上一步结束时，`bge_embedding_node` 仍由 `PendingNode` 代替，chunk 只有正文和商品名称。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── clients/
+│   │   └── dashscope_embedding.py              # 新增
+│   └── workflows/importing/nodes/
+│       └── bge_embedding.py                    # 新增
+└── tests/
+    ├── test_bge_embedding_node.py              # 新增
+    └── test_dashscope_embedding_client.py      # 新增
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── .gitignore
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── app/workflows/importing/state.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/dashscope_embedding.py` | 使用现有 `httpx` 调用百炼原生同步向量接口，请求底库文本的 1024 维稠密向量和稀疏向量，并校验鉴权配置、批量上限、HTTP 状态、返回数量、顺序、维度与数值。 |
+| `backend/app/workflows/importing/nodes/bge_embedding.py` | 保留课程节点名，校验 chunks，拼接“商品名称 + 正文”，按批调用云端向量服务，无副作用地把两种向量写回 chunk，并按需备份 JSON。 |
+| `backend/tests/test_dashscope_embedding_client.py` | 用内存 HTTP 服务验证 URL、Bearer 鉴权、`document` 类型、`dense&sparse` 参数、乱序响应复原、输入限制、超时、HTTP 错误及异常向量响应。 |
+| `backend/tests/test_bge_embedding_node.py` | 验证分批、文本拼接、两种向量回填、原状态不被修改、备份开关、客户端错误、数量不一致和无效 chunk。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 删除不再使用的本地 BGE-M3 路径、设备和半精度配置，增加百炼向量地址、模型、维度、批次、超时和备份开关。 |
+| `.gitignore` | 忽略 `*_vectors.json`、项目内 Python 3.10 基础运行时和安装缓存，避免大型运行文件进入 Git。 |
+| `backend/app/core/config.py` | 加载百炼向量配置，限定官方支持的维度，并把单批文本数限制为 1～10。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增 `EmbeddingError`，使向量服务失败在节点边界清晰终止。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `BgeEmbeddingNode` 替换占位节点，并增加测试或调用方注入接口。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 导出混合向量节点。 |
+| `backend/app/workflows/importing/state.py` | 给 `DocumentChunk` 增加 `dense_vector`、`sparse_vector`，给图状态增加向量备份路径。 |
+| `backend/tests/test_config.py` | 验证云端向量默认配置、批次上限和可选维度限制。 |
+| `backend/tests/test_import_workflow.py` | 在 PDF、Markdown 完整流程测试中注入模拟向量服务，并确认真实节点已回填向量。 |
+| `backend/README.md` | 更新导入流程进度，增加云端混合向量配置、输出、错误边界、隐私和模型一致性说明。 |
+| `docs/development-log.md` | 记录第 9 步的方案取舍、目录差异、验证结果和下一步。 |
+
+### 节点执行流程
+
+```text
+读取上一步已回填 item_name 的 chunks
+  ↓
+逐块组装：item_name + 换行 + content
+  ↓
+每批最多 10 条，使用 text_type=document
+  ↓
+调用百炼 text-embedding-v4 原生同步接口
+  ↓
+一次返回 dense 1024 维向量与 sparse 非零权重
+  ↓
+按 text_index 恢复输入顺序并做完整校验
+  ↓
+把 dense_vector、sparse_vector 写回每个 chunk
+  ↓
+把稠密向量列表写入 state.embeddings
+  ↓
+按配置生成 *_vectors.json 调试备份
+```
+
+### 为什么使用百炼原生接口
+
+- OpenAI 兼容 `/embeddings` 接口适合获得稠密向量，但百炼原生接口还支持 `output_type=dense&sparse`，可以一次完成课程 BGE-M3 的两类输出。
+- 稠密向量负责语义相近内容，稀疏向量更擅长型号、专业词和精确关键词；下一步仍可在 Milvus 中建立两套索引并做混合召回。
+- 服务器只运行 FastAPI、数据处理和数据库客户端，不运行 PyTorch 或 BGE-M3，因此不会额外占用大量常驻内存，也没有模型缓存要部署。
+- 入库显式使用 `text_type=document`；后续查询必须使用同一模型、同一维度并改用 `query`，避免入库与检索向量空间不一致。
+
+官方同步接口说明 `text-embedding-v4` 单次最多接收 10 条文本、单条最长 8192 Token，并支持 64～2048 的多个向量维度。本项目继续采用课程兼容且官方推荐用于通用检索的 1024 维：
+
+- [阿里云百炼：同步向量接口](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api)
+- [阿里云百炼：向量模型与规格](https://help.aliyun.com/zh/model-studio/embedding)
+
+### 配置与输出
+
+公开配置模板为：
+
+```dotenv
+DASHSCOPE_API_BASE=https://dashscope.aliyuncs.com/api/v1
+DASHSCOPE_API_KEY=
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSION=1024
+EMBEDDING_BATCH_SIZE=10
+EMBEDDING_REQUEST_TIMEOUT_SECONDS=60
+EMBEDDING_BACKUP_ENABLED=true
+```
+
+每个 chunk 在本步新增：
+
+```json
+{
+  "dense_vector": [0.012, -0.034, 0.056],
+  "sparse_vector": {
+    "7149": 0.829,
+    "111290": 0.9004
+  }
+}
+```
+
+示例只展示少量元素；真实稠密向量固定为 1024 维。Python 内部的稀疏索引键是整数，JSON 规范会在调试备份中把对象键显示为字符串，后续写入 Milvus 时仍使用内存中的整数键。
+
+### Python 与虚拟环境
+
+检查开始时，`backend/.venv` 记录的 Python 3.10 基础解释器再次缺失。恢复官方 Python 3.10.11 后发现 Codex 项目沙箱无法在普通命令中持续读取用户目录，因此把同一基础运行时复制到 Git 忽略的 `backend/.python310`，并让 `.venv` 指向该路径。
+
+最终确认：
+
+```text
+项目解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+虚拟环境依赖目录：约 239 MiB
+项目内基础运行时：约 54 MiB（Git 已忽略）
+新增 Python 包：0
+pip check：No broken requirements found
+```
+
+所有代码检查、单元测试和真实 API 调用都使用 `backend/.venv`，没有使用系统 Python 3.13。
+
+### 测试与真实 API 验证
+
+- Ruff 格式检查通过，共检查 53 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 117 个测试：116 个通过，1 个 Docker 基础设施测试按开关跳过。
+- 总覆盖率为 89%；`dashscope_embedding.py` 为 89%，`bge_embedding.py` 为 91%。
+- `pip check` 返回 `No broken requirements found`。
+- 单元测试使用内存 HTTP 服务和注入向量器，不消耗百炼额度。
+- 使用 2 段不含隐私的 RS-12 合成说明真实调用 `text-embedding-v4`，返回 2 组 1024 维稠密向量和分别含 7、8 个非零项的稀疏向量，真实链路通过。
+- 真实验证只输出结果数量和向量维度，没有输出 API Key、完整向量或上游请求正文。
+- 本步没有调用 MinerU，没有启动 Docker，也没有访问 MinIO、MongoDB 或 Milvus。
+
+### 当前边界
+
+- 向量化会把商品名称和全部切片正文发送给阿里云百炼，敏感资料需要先确认数据合规要求。
+- 向量结果与模型和维度绑定；修改 `EMBEDDING_MODEL` 或 `EMBEDDING_DIMENSION` 后，需要重建已有知识库向量，不能混用。
+- API 临时失败当前会明确终止导入，尚未加入自动重试和断点续传。
+- `import_milvus_node` 仍是占位节点，因此本步生成的向量尚未写入数据库。
+- 工作流仍未暴露为文档上传 HTTP API。
+
+### 下一步
+
+第 10 步将实现 `import_milvus_node`：创建稠密和稀疏向量字段及索引，把 chunks 批量写入 Milvus，并将数据库生成的 ID 回填到工作流状态。
+
+### 一句话总结
+
+第 9 步用百炼 `text-embedding-v4` API 取代本地 BGE-M3，为每个知识片段生成可供 Milvus 混合检索的 1024 维稠密向量和关键词稀疏向量。

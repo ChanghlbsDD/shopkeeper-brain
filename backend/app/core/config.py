@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     item_name_context_max_length: int = Field(default=2500, ge=100, le=100_000)
     item_name_backup_enabled: bool = True
 
+    dashscope_api_base: str = "https://dashscope.aliyuncs.com/api/v1"
+    embedding_model: str = "text-embedding-v4"
+    embedding_dimension: Literal[64, 128, 256, 512, 768, 1024, 1536, 2048] = 1024
+    embedding_batch_size: int = Field(default=10, ge=1, le=10)
+    embedding_request_timeout_seconds: float = Field(default=60, gt=0, le=600)
+    embedding_backup_enabled: bool = True
+
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
         if self.document_chunk_max_length <= self.document_chunk_min_length:

@@ -2,11 +2,16 @@ from pathlib import Path
 
 import pytest
 
+from app.clients.dashscope_embedding import TextEmbedding
 from app.workflows.importing.graph import (
     create_import_workflow,
     route_import_file,
 )
-from app.workflows.importing.nodes import ItemNameRecognitionNode, PdfToMarkdownNode
+from app.workflows.importing.nodes import (
+    BgeEmbeddingNode,
+    ItemNameRecognitionNode,
+    PdfToMarkdownNode,
+)
 from app.workflows.importing.state import create_import_state
 
 
@@ -21,6 +26,10 @@ def successful_item_recognizer(_file_title: str, _context: str) -> str:
     return "测试设备"
 
 
+def successful_embedder(texts: list[str]) -> list[TextEmbedding]:
+    return [TextEmbedding(dense_vector=[0.1, 0.2], sparse_vector={1: 0.5}) for _ in texts]
+
+
 def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     source = tmp_path / "manual.pdf"
     source.write_bytes(b"%PDF test fixture")
@@ -29,6 +38,10 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
         pdf_to_md_node=PdfToMarkdownNode(converter=successful_mineru),
         item_name_node=ItemNameRecognitionNode(
             recognizer=successful_item_recognizer,
+            backup_enabled=False,
+        ),
+        embedding_node=BgeEmbeddingNode(
+            embedder=successful_embedder,
             backup_enabled=False,
         ),
     )
@@ -47,6 +60,7 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     assert Path(result["md_path"]).is_file()
     assert result["chunks"][0]["content"] == "# Converted"
     assert result["item_name"] == "测试设备"
+    assert result["chunks"][0]["dense_vector"] == [0.1, 0.2]
 
 
 def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
@@ -57,7 +71,11 @@ def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
         item_name_node=ItemNameRecognitionNode(
             recognizer=successful_item_recognizer,
             backup_enabled=False,
-        )
+        ),
+        embedding_node=BgeEmbeddingNode(
+            embedder=successful_embedder,
+            backup_enabled=False,
+        ),
     )
     result = workflow.invoke(create_import_state(str(source)))
 

@@ -15,6 +15,8 @@ class DocumentChunk(TypedDict, total=False):
     content: str
     part: int
     item_name: str
+    dense_vector: list[float]
+    sparse_vector: dict[int, float]
 
 
 class ImportGraphState(TypedDict, total=False):
@@ -37,6 +39,7 @@ class ImportGraphState(TypedDict, total=False):
     item_name_source: Literal["", "qwen", "file_title_fallback"]
     item_name_chunks_path: str
     embeddings: list[list[float]]
+    embedding_chunks_path: str
     milvus_ids: list[str]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
@@ -59,6 +62,7 @@ DEFAULT_IMPORT_STATE: ImportGraphState = {
     "item_name_source": "",
     "item_name_chunks_path": "",
     "embeddings": [],
+    "embedding_chunks_path": "",
     "milvus_ids": [],
     "completed_nodes": [],
     "node_durations_ms": {},

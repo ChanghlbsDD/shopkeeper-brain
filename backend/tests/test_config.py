@@ -74,3 +74,19 @@ def test_qwen_item_name_defaults_and_limits() -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, item_name_chunk_count=0)
+
+
+def test_cloud_embedding_defaults_and_limits() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.dashscope_api_base == "https://dashscope.aliyuncs.com/api/v1"
+    assert settings.embedding_model == "text-embedding-v4"
+    assert settings.embedding_dimension == 1024
+    assert settings.embedding_batch_size == 10
+    assert settings.embedding_backup_enabled is True
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, embedding_batch_size=11)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, embedding_dimension=1000)
