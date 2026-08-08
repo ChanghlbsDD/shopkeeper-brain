@@ -1075,3 +1075,169 @@ pip check：No broken requirements found
 ### 一句话总结
 
 第 6 步把 Markdown 本地图片安全上传到独立 MinIO 图片桶并替换为公开地址，同时保留原始文档和完整上传映射。
+
+## 第 7 步：Markdown 文档结构化切分
+
+日期：2026-08-08
+
+### 本步目标
+
+把 `document_split_node` 从占位节点替换为真实业务节点，将上一步得到的 Markdown 正文转换为适合后续商品名识别、向量化和 Milvus 入库的知识片段。
+
+课程采用“标题初切、长块再切、短块合并、表格降维”的方案。本项目保留该主流程，并使用课程参数评估笔记最终推荐的默认值：最大 1000 字符、最小 200 字符。
+
+### 与上一步的目录区别
+
+上一步结束时，`document_split_node` 只记录执行顺序，没有真正产生 `chunks`。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/workflows/importing/
+│   ├── markdown_tables.py                   # 新增
+│   └── nodes/
+│       └── document_split.py                # 新增
+└── tests/
+    ├── test_document_split_node.py          # 新增
+    └── test_markdown_tables.py              # 新增
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── .gitignore
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── app/workflows/importing/state.py
+│   ├── requirements.txt
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/workflows/importing/markdown_tables.py` | 识别 Markdown 与 HTML 表格，展开 `rowspan`、`colspan`，把行列关系转换为便于向量检索的中文线性文本。 |
+| `backend/app/workflows/importing/nodes/document_split.py` | 校验正文和阈值，按标题切章节，拆分长章节，合并同父标题短章节，组装 `chunks` 并按需备份 JSON。 |
+| `backend/tests/test_document_split_node.py` | 验证标题层级、代码围栏、纯标题文档、超长切分、短块合并、长度上限、表格处理、参数错误和备份开关。 |
+| `backend/tests/test_markdown_tables.py` | 验证 Markdown 表格、HTML 键值表、跨行单元格以及非表格正文保持不变。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 增加最大切片长度、最小合并长度和 JSON 备份开关。 |
+| `.gitignore` | 忽略运行时生成的 `*_chunks.json`，避免调试产物进入 Git。 |
+| `backend/app/core/config.py` | 增加切分配置，并在启动配置阶段校验 `0 < min < max` 和最大值下限。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增 `DocumentSplitError`，用于表达无法生成有效知识片段的业务错误。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `DocumentSplitNode` 替换占位节点，并保留测试注入参数。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 导出文档切分节点。 |
+| `backend/app/workflows/importing/state.py` | 定义 `DocumentChunk` 结构，并增加 `chunks_path` 备份路径。 |
+| `backend/requirements.txt` | 固定增加 `langchain-text-splitters==1.1.2` 和 `beautifulsoup4==4.15.0`。 |
+| `backend/tests/test_config.py` | 增加切分默认配置与大小关系校验。 |
+| `backend/tests/test_import_workflow.py` | 确认 PDF 和 Markdown 两条完整分支现在都会真实产生 `chunks`。 |
+| `backend/README.md` | 增加切分配置、处理顺序、输出结构、备份行为和本地执行说明。 |
+| `docs/development-log.md` | 记录第 7 步目录差异、实现决策、验证结果和下一步。 |
+
+### 节点执行流程
+
+```text
+读取 md_content、file_title 和切分配置
+  ↓
+统一 Windows、Linux 换行符
+  ↓
+识别 1～6 级 Markdown 标题并维护父标题层级
+  ↓
+跳过代码围栏内部看起来像标题的 # 行
+  ↓
+Markdown/HTML 表格转换为带行列语义的中文文本
+  ↓
+超长章节按段落、换行、中文和英文句末标点递归切分
+  ↓
+同一父标题下的短片段在不超过 max 的前提下合并
+  ↓
+组装 title、parent_title、file_title、content、可选 part
+  ↓
+写入 state.chunks，并按配置生成 *_chunks.json
+```
+
+### 相比课程示例的稳健性调整
+
+- 课程示例直接读取 `current_sections[0]`，空文档可能产生下标异常；当前节点会提前验证正文并明确报告业务错误。
+- 短片段只有在父标题相同且合并后仍不超过最大长度时才会合并，避免为了减少碎片而生成超长块。
+- 不把空的结构标题单独生成无意义块，但仅含一个标题的合法 Markdown 仍会得到一个可用 chunk。
+- 递归切分保留句末分隔符，避免中文句号等语义边界在切分时丢失。
+- 超长章节保留原始标题，使用独立 `part` 数字标记顺序，不反复修改标题文字。
+- 备份文件采用 `<Markdown 文件名>_chunks.json`，避免不同文档都覆盖同一个 `chunks.json`。
+- JSON 备份失败只影响调试文件，不丢失已经写入 LangGraph 状态的核心 `chunks`。
+
+### 配置与输出
+
+公开配置模板为：
+
+```dotenv
+DOCUMENT_CHUNK_MAX_LENGTH=1000
+DOCUMENT_CHUNK_MIN_LENGTH=200
+DOCUMENT_CHUNK_BACKUP_ENABLED=true
+```
+
+每个 chunk 的基础结构为：
+
+```json
+{
+  "title": "## 安全说明",
+  "parent_title": "# 产品手册",
+  "file_title": "产品手册",
+  "content": "## 安全说明\n\n使用前请阅读……",
+  "part": 1
+}
+```
+
+`part` 只在一个超长章节被拆成多个片段时出现。当前阈值按字符数计算，不等同于模型 Token 数；其目标是在 BGE-M3 上限以内进一步控制语义粒度。
+
+### Python 与依赖
+
+所有安装和验证继续使用：
+
+```text
+解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+langchain-text-splitters：1.1.2
+beautifulsoup4：4.15.0
+虚拟环境大小：约 239 MB
+```
+
+官方 PyPI 查询时再次遇到 TLS 连接中断，随后使用阿里云 PyPI 镜像查询并安装相同的固定版本。安装没有升级或破坏现有 LangGraph 依赖，`pip check` 最终没有发现冲突。
+
+### 测试与真实文档验证
+
+- Ruff 格式检查通过，共检查 44 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 62 个测试：61 个通过，1 个 Docker 基础设施测试按开关跳过。
+- 总覆盖率为 88%；`document_split.py` 为 93%，`markdown_tables.py` 为 86%。
+- `pip check` 返回 `No broken requirements found`。
+- 使用课程笔记 `切分与合并参数简单评估方式.md` 完成只读真实文档验收，没有写入课程目录。
+- 该课程文档按默认 1000/200 参数得到 10 个 chunk；最短 221 字符，最长 990 字符，超过 1000 字符的片段为 0。
+- 真实验证关闭了 JSON 备份，没有调用 MinerU、通义千问、MinIO、MongoDB 或 Milvus，也没有产生 API 费用。
+
+### 当前边界
+
+- 切分长度当前按 Python 字符数计算，不进行模型 Token 精确计数。
+- 表格线性化面向常见 MinerU HTML 表格和标准 Markdown 表格，不执行复杂 HTML 页面渲染。
+- 商品名识别、BGE-M3 向量化和 Milvus 写入三个后续节点仍是占位节点。
+- 工作流仍未暴露为文档上传 HTTP API。
+
+### 下一步
+
+第 8 步将实现 `item_name_recognition_node`：调用通义千问兼容 API，从文档标题和切片内容中识别商品名称，并写回每个 chunk。
+
+### 一句话总结
+
+第 7 步把 Markdown 按标题语义、长度和表格结构稳定切成不超上限的知识片段，为后续商品识别和向量检索准备好了标准 `chunks`。

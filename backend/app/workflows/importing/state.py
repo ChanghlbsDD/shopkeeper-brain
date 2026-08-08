@@ -6,6 +6,16 @@ from copy import deepcopy
 from typing import Literal, TypedDict
 
 
+class DocumentChunk(TypedDict, total=False):
+    """标题切分后交给识别、向量化和入库节点的知识片段。"""
+
+    title: str
+    parent_title: str
+    file_title: str
+    content: str
+    part: int
+
+
 class ImportGraphState(TypedDict, total=False):
     """在文档导入节点之间传递的数据。"""
 
@@ -20,7 +30,8 @@ class ImportGraphState(TypedDict, total=False):
     file_title: str
     md_content: str
     uploaded_image_urls: dict[str, str]
-    chunks: list[dict[str, object]]
+    chunks: list[DocumentChunk]
+    chunks_path: str
     item_name: str
     embeddings: list[list[float]]
     milvus_ids: list[str]
@@ -40,6 +51,7 @@ DEFAULT_IMPORT_STATE: ImportGraphState = {
     "md_content": "",
     "uploaded_image_urls": {},
     "chunks": [],
+    "chunks_path": "",
     "item_name": "",
     "embeddings": [],
     "milvus_ids": [],

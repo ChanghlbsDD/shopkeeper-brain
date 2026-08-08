@@ -36,6 +36,7 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     ]
     assert result["task_id"] == "pdf-task"
     assert Path(result["md_path"]).is_file()
+    assert result["chunks"][0]["content"] == "# Converted"
 
 
 def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
@@ -53,6 +54,7 @@ def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
         "import_milvus_node",
     ]
     assert "pdf_to_md_node" not in result["node_durations_ms"]
+    assert result["chunks"][0]["content"] == "# Manual"
 
 
 def test_router_rejects_state_without_file_type() -> None:

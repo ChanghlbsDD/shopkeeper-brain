@@ -2,8 +2,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing_extensions import Self
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
@@ -48,6 +49,16 @@ class Settings(BaseSettings):
     mineru_request_timeout_seconds: float = Field(default=120, gt=0, le=600)
     mineru_poll_interval_seconds: float = Field(default=2, gt=0, le=60)
     mineru_task_timeout_seconds: int = Field(default=1800, gt=0, le=7200)
+
+    document_chunk_max_length: int = Field(default=1000, ge=64, le=100_000)
+    document_chunk_min_length: int = Field(default=200, ge=1, le=99_999)
+    document_chunk_backup_enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_document_chunk_lengths(self) -> Self:
+        if self.document_chunk_max_length <= self.document_chunk_min_length:
+            raise ValueError("DOCUMENT_CHUNK_MAX_LENGTH 必须大于 DOCUMENT_CHUNK_MIN_LENGTH")
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

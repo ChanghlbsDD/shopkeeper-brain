@@ -62,3 +62,4 @@ playwright-report/
 test-results/
 *.log
 *.tmp
+*_chunks.json

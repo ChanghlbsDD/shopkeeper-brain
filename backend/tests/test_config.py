@@ -44,3 +44,20 @@ def test_minio_images_use_a_separate_public_bucket() -> None:
     assert settings.minio_image_bucket_name == "shopkeeper-images"
     assert settings.minio_public_base_url == "http://localhost:9000"
     assert settings.minio_image_public_read is True
+
+
+def test_document_chunk_lengths_are_validated() -> None:
+    settings = Settings(
+        _env_file=None,
+        document_chunk_max_length=1000,
+        document_chunk_min_length=200,
+    )
+
+    assert settings.document_chunk_backup_enabled is True
+
+    with pytest.raises(ValidationError, match="MAX_LENGTH"):
+        Settings(
+            _env_file=None,
+            document_chunk_max_length=200,
+            document_chunk_min_length=200,
+        )

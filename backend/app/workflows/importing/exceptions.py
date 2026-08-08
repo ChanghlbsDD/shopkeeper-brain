@@ -37,3 +37,7 @@ class PdfConversionError(ImportWorkflowError):
 
 class MarkdownImageError(ImportWorkflowError):
     """Markdown 图片路径校验、上传或链接替换失败。"""
+
+
+class DocumentSplitError(ImportWorkflowError):
+    """Markdown 文档无法切分为有效知识片段。"""

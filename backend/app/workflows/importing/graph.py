@@ -9,6 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from app.workflows.importing.base import BaseNode
 from app.workflows.importing.nodes import (
+    DocumentSplitNode,
     EntryNode,
     MarkdownImageNode,
     PdfToMarkdownNode,
@@ -39,6 +40,7 @@ def create_import_workflow(
     *,
     pdf_to_md_node: BaseNode | None = None,
     md_image_node: BaseNode | None = None,
+    document_split_node: BaseNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
@@ -46,10 +48,7 @@ def create_import_workflow(
     graph.add_node(ENTRY_NODE, EntryNode())
     graph.add_node(PDF_TO_MD_NODE, pdf_to_md_node or PdfToMarkdownNode())
     graph.add_node(MD_IMAGE_NODE, md_image_node or MarkdownImageNode())
-    graph.add_node(
-        DOCUMENT_SPLIT_NODE,
-        PendingNode(DOCUMENT_SPLIT_NODE, "后续将 Markdown 切分为语义片段"),
-    )
+    graph.add_node(DOCUMENT_SPLIT_NODE, document_split_node or DocumentSplitNode())
     graph.add_node(
         ITEM_NAME_NODE,
         PendingNode(ITEM_NAME_NODE, "后续识别文档中的商品名称"),

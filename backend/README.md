@@ -69,7 +69,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址。文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段。商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
@@ -79,6 +79,7 @@ from app.workflows.importing import run_import_workflow
 result = run_import_workflow(r"D:\docs\manual.pdf", file_dir=r"D:\docs\output")
 print(result["completed_nodes"])
 print(result["md_path"])
+print(result["chunks"])
 ```
 
 ## Markdown 图片处理
@@ -94,6 +95,28 @@ MINIO_IMAGE_PUBLIC_READ=true
 处理含本地图片的 Markdown 前需要启动 MinIO。节点只上传 Markdown 实际引用且位于 Markdown 目录内的 JPG、JPEG、PNG、GIF、WebP 或 BMP 文件；远程图片保持不变，重复引用只上传一次。处理结果保存为同目录下的 `*_images.md`，原文件保持不变。
 
 图片桶默认允许匿名读取，以便浏览器和后续问答结果直接展示图片，因此不要上传包含敏感信息的图片。部署到服务器时，`MINIO_PUBLIC_BASE_URL` 必须改成浏览器能够访问的 HTTPS 域名或反向代理地址，不能填写仅容器内部可见的 `minio:9000`。
+
+## Markdown 文档切分
+
+切分节点使用以下配置，单位是字符数：
+
+```dotenv
+DOCUMENT_CHUNK_MAX_LENGTH=1000
+DOCUMENT_CHUNK_MIN_LENGTH=200
+DOCUMENT_CHUNK_BACKUP_ENABLED=true
+```
+
+处理顺序如下：
+
+1. 按 Markdown 1～6 级标题建立章节，并保留父标题关系。
+2. 忽略代码围栏内部看起来像标题的 `#` 行。
+3. 把 Markdown 或 HTML 表格转换为保留行列关系的自然语言。
+4. 超过最大长度的章节按段落、换行和中英文句末标点递归切分。
+5. 仅在父标题相同且合并后不超过最大长度时合并短片段。
+
+最终结果写入状态中的 `chunks`，每个片段包含 `title`、`parent_title`、`file_title` 和 `content`，超长章节还带有 `part` 序号。默认同时在 Markdown 旁生成 `*_chunks.json` 方便检查，该运行产物已被 Git 忽略；生产环境如不需要备份，可把 `DOCUMENT_CHUNK_BACKUP_ENABLED` 设为 `false`。
+
+文档切分是本地纯文本处理，不会调用 MinerU、通义千问、MinIO 或其他网络服务。
 
 ## 目录职责
 
