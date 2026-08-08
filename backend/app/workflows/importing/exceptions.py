@@ -41,3 +41,7 @@ class MarkdownImageError(ImportWorkflowError):
 
 class DocumentSplitError(ImportWorkflowError):
     """Markdown 文档无法切分为有效知识片段。"""
+
+
+class ItemNameRecognitionError(ImportWorkflowError):
+    """通义千问无法从文档片段中识别有效商品名称。"""

@@ -5,9 +5,8 @@ import pytest
 from app.workflows.importing.graph import (
     create_import_workflow,
     route_import_file,
-    run_import_workflow,
 )
-from app.workflows.importing.nodes import PdfToMarkdownNode
+from app.workflows.importing.nodes import ItemNameRecognitionNode, PdfToMarkdownNode
 from app.workflows.importing.state import create_import_state
 
 
@@ -18,11 +17,21 @@ def successful_mineru(pdf_path: Path, output_directory: Path) -> Path:
     return markdown_path
 
 
+def successful_item_recognizer(_file_title: str, _context: str) -> str:
+    return "测试设备"
+
+
 def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     source = tmp_path / "manual.pdf"
     source.write_bytes(b"%PDF test fixture")
 
-    workflow = create_import_workflow(pdf_to_md_node=PdfToMarkdownNode(converter=successful_mineru))
+    workflow = create_import_workflow(
+        pdf_to_md_node=PdfToMarkdownNode(converter=successful_mineru),
+        item_name_node=ItemNameRecognitionNode(
+            recognizer=successful_item_recognizer,
+            backup_enabled=False,
+        ),
+    )
     result = workflow.invoke(create_import_state(str(source), task_id="pdf-task"))
 
     assert result["completed_nodes"] == [
@@ -37,13 +46,20 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     assert result["task_id"] == "pdf-task"
     assert Path(result["md_path"]).is_file()
     assert result["chunks"][0]["content"] == "# Converted"
+    assert result["item_name"] == "测试设备"
 
 
 def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
     source = tmp_path / "manual.md"
     source.write_text("# Manual", encoding="utf-8")
 
-    result = run_import_workflow(str(source))
+    workflow = create_import_workflow(
+        item_name_node=ItemNameRecognitionNode(
+            recognizer=successful_item_recognizer,
+            backup_enabled=False,
+        )
+    )
+    result = workflow.invoke(create_import_state(str(source)))
 
     assert result["completed_nodes"] == [
         "entry_node",
@@ -55,6 +71,7 @@ def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
     ]
     assert "pdf_to_md_node" not in result["node_durations_ms"]
     assert result["chunks"][0]["content"] == "# Manual"
+    assert result["item_name"] == "测试设备"
 
 
 def test_router_rejects_state_without_file_type() -> None:

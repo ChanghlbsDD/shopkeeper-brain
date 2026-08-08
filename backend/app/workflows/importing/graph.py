@@ -11,6 +11,7 @@ from app.workflows.importing.base import BaseNode
 from app.workflows.importing.nodes import (
     DocumentSplitNode,
     EntryNode,
+    ItemNameRecognitionNode,
     MarkdownImageNode,
     PdfToMarkdownNode,
     PendingNode,
@@ -41,6 +42,7 @@ def create_import_workflow(
     pdf_to_md_node: BaseNode | None = None,
     md_image_node: BaseNode | None = None,
     document_split_node: BaseNode | None = None,
+    item_name_node: BaseNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
@@ -49,10 +51,7 @@ def create_import_workflow(
     graph.add_node(PDF_TO_MD_NODE, pdf_to_md_node or PdfToMarkdownNode())
     graph.add_node(MD_IMAGE_NODE, md_image_node or MarkdownImageNode())
     graph.add_node(DOCUMENT_SPLIT_NODE, document_split_node or DocumentSplitNode())
-    graph.add_node(
-        ITEM_NAME_NODE,
-        PendingNode(ITEM_NAME_NODE, "后续识别文档中的商品名称"),
-    )
+    graph.add_node(ITEM_NAME_NODE, item_name_node or ItemNameRecognitionNode())
     graph.add_node(
         EMBEDDING_NODE,
         PendingNode(EMBEDDING_NODE, "后续生成 BGE-M3 稠密和稀疏向量"),

@@ -1241,3 +1241,170 @@ beautifulsoup4：4.15.0
 ### 一句话总结
 
 第 7 步把 Markdown 按标题语义、长度和表格结构稳定切成不超上限的知识片段，为后续商品识别和向量检索准备好了标准 `chunks`。
+
+## 第 8 步：通义千问商品名称识别
+
+日期：2026-08-08
+
+### 本步目标
+
+把 `item_name_recognition_node` 从占位节点替换为真实业务节点：从有限数量的前置文档切片中提取核心商品或设备名称，写入工作流状态，并回填到每个 chunk，为后续向量化和分类检索提供统一实体名称。
+
+课程示例在该节点中同时执行商品名识别、BGE-M3 向量化和 Milvus 写入。当前项目的 LangGraph 已经为向量化和入库分别设置后续节点，因此本步只负责商品名识别与回填，不提前加载本地模型，也不写 Milvus。
+
+### 与上一步的目录区别
+
+上一步结束时，`item_name_recognition_node` 仍由 `PendingNode` 代替。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── clients/
+│   │   └── qwen_chat.py                         # 新增
+│   └── workflows/importing/
+│       ├── prompts.py                           # 新增
+│       └── nodes/
+│           └── item_name_recognition.py         # 新增
+└── tests/
+    ├── test_item_name_recognition_node.py       # 新增
+    └── test_qwen_chat_client.py                 # 新增
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── app/workflows/importing/state.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/qwen_chat.py` | 使用现有 `httpx` 调用通义千问 OpenAI 兼容 Chat Completions，启用 JSON mode，校验配置、HTTP 状态和响应结构。 |
+| `backend/app/workflows/importing/prompts.py` | 集中保存商品名识别系统提示词与用户模板，并明确文档是不可信数据、核心品类不得省略。 |
+| `backend/app/workflows/importing/nodes/item_name_recognition.py` | 校验状态、限制上下文、调用千问、规范化商品名、处理 `UNKNOWN` 降级、无副作用回填 chunks 并按需备份。 |
+| `backend/tests/test_qwen_chat_client.py` | 用内存 HTTP 服务验证请求地址、Bearer 鉴权、JSON mode、代码围栏兼容、配置错误、HTTP 错误、超时和异常 JSON。 |
+| `backend/tests/test_item_name_recognition_node.py` | 验证上下文数量和长度、商品名回填、原状态不被修改、文件名降级、异常传播、输入校验与 JSON 备份。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 给出北京地域兼容地址、`qwen-flash` 默认模型、超时、输出上限、上下文数量与备份开关；Token 继续留空。 |
+| `backend/app/core/config.py` | 正式加载通义千问和商品名识别配置，并限制温度、超时、输出 Token 和上下文参数范围。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增 `ItemNameRecognitionError`，为商品名 API 与响应错误提供清晰节点边界。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `ItemNameRecognitionNode` 替换占位节点，并保留测试注入入口。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 导出商品名识别节点。 |
+| `backend/app/workflows/importing/state.py` | 给 `DocumentChunk` 增加 `item_name`，并增加识别来源和备份路径状态。 |
+| `backend/tests/test_config.py` | 验证千问地址、模型、输出 Token 和上下文默认值及范围。 |
+| `backend/tests/test_import_workflow.py` | 为完整工作流注入模拟识别器，确认 PDF 与 Markdown 分支都会生成并回填商品名，避免单元测试消耗真实 API。 |
+| `backend/README.md` | 增加通义千问配置、数据范围、降级规则、隐私边界和地域地址说明。 |
+| `docs/development-log.md` | 记录第 8 步实现、真实调用结果、目录差异和下一步。 |
+
+### 节点执行流程
+
+```text
+读取 file_title 和 chunks
+  ↓
+最多选取前 ITEM_NAME_CHUNK_COUNT 个切片
+  ↓
+连同切片标签截断到 ITEM_NAME_CONTEXT_MAX_LENGTH 字符以内
+  ↓
+标题 + 有限正文进入防提示词注入的抽取模板
+  ↓
+POST /chat/completions，使用 qwen-flash 和 JSON mode
+  ↓
+解析 {"item_name": "..."} 并校验字符串、空值和 200 字符上限
+  ↓
+若明确为 UNKNOWN：使用 file_title，并标记 file_title_fallback
+  ↓
+其他有效结果：标记 qwen，无副作用地复制并回填所有 chunks
+  ↓
+按配置生成 *_item_name_chunks.json
+```
+
+### API 与安全设计
+
+- 直接使用项目已有的 `httpx` 调用 OpenAI 兼容接口，没有新增 OpenAI SDK 或 LangChain 模型客户端，保持 2 GiB 服务器部署尽量轻量。
+- 请求启用 `response_format={"type":"json_object"}`，系统与用户提示词都明确包含 JSON 要求，符合百炼 JSON mode 的调用条件。
+- 单次回复最多 128 Token，温度默认为 0，减少费用、输出漂移和无关内容。
+- 客户端不会在日志或异常中打印 API Key、请求正文或上游响应正文；HTTP 错误只暴露状态码。
+- 文档片段被视为不可信数据，系统提示词明确禁止执行其中的指令，降低文档提示词注入风险。
+- 只有模型明确返回 `UNKNOWN` 才降级为文件名；密钥缺失、网络错误、非 JSON 或缺少 `item_name` 会明确失败，避免错误数据继续入库。
+- 传入模型的正文最多 2500 字符且默认仅取前 3 个 chunk，但这些内容仍会发送到阿里云百炼，敏感文档需要先确认合规要求。
+
+当前官方文档仍支持 `qwen-flash` 的非思考 JSON mode，并说明北京地域可使用课程中的兼容地址。新工作区或其他地域应按控制台信息修改地址：
+
+- [阿里云百炼：结构化输出](https://help.aliyun.com/zh/model-studio/qwen-structured-output)
+- [阿里云百炼：首次调用通义千问](https://help.aliyun.com/zh/model-studio/first-api-call-to-qwen)
+
+### 配置
+
+公开配置模板为：
+
+```dotenv
+OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_API_KEY=
+ITEM_MODEL=qwen-flash
+LLM_DEFAULT_TEMPERATURE=0
+QWEN_REQUEST_TIMEOUT_SECONDS=60
+ITEM_NAME_MAX_OUTPUT_TOKENS=128
+ITEM_NAME_CHUNK_COUNT=3
+ITEM_NAME_CONTEXT_MAX_LENGTH=2500
+ITEM_NAME_BACKUP_ENABLED=true
+```
+
+当前 Codex 进程能够读取系统提供的 `DASHSCOPE_API_KEY`。验证只记录了“已配置”和长度，没有输出、复制或写入真实 Token；仓库根目录 `.env` 中没有新增该密钥，`.env.example` 仍为空值。
+
+### Python 与依赖
+
+本步没有增加 Python 包，继续复用已经固定的 `httpx==0.28.1`：
+
+```text
+解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+虚拟环境大小：约 239 MB
+pip check：No broken requirements found
+```
+
+所有测试、真实 API 调用和检查都使用 `backend/.venv`，没有使用系统 Python 3.13。
+
+### 测试与真实 API 验证
+
+- Ruff 格式检查通过，共检查 49 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 88 个测试：87 个通过，1 个 Docker 基础设施测试按开关跳过。
+- 总覆盖率为 88%；`qwen_chat.py` 为 93%，`item_name_recognition.py` 为 85%。
+- `pip check` 返回 `No broken requirements found`。
+- 单元测试全部使用内存 HTTP 服务和注入识别器，不消耗通义千问额度。
+- 使用一段不含隐私的合成正文真实调用 `qwen-flash` 两次，验证 OpenAI 兼容端点、JSON mode、Token 和状态回填。
+- 第一次返回“优利德 RS-12”，说明模型省略了正文明确存在的核心品类；据此收紧提示词，要求核心品类不得省略。
+- 第二次返回“优利德 RS-12 数字万用表”，来源为 `qwen`，1 个测试 chunk 正确回填，真实链路验收通过。
+- 两次调用均未输出 API Key 或完整请求；没有调用 MinerU，没有启动 Docker，也没有访问 MinIO、MongoDB 或 Milvus。
+
+### 当前边界
+
+- 商品名识别只查看文档标题和前置少量 chunk；如果商品名称只在文档很后面出现，可能降级或识别不完整。
+- 当前只提取一个核心商品名称，不处理一份文档包含多个并列商品的情况。
+- 本步不生成商品名向量，也不写入 Milvus；这两个职责留给后续向量化与入库节点。
+- BGE-M3 本地模型对 2 核 2 GiB 服务器可能过重，下一步开始前需要结合现有服务器继续选择轻量 API 或本地方案。
+- 工作流仍未暴露为文档上传 HTTP API。
+
+### 下一步
+
+第 9 步将先评估 2 核 2 GiB 服务器可承载的向量化方案，再实现 `bge_embedding_node`，为每个 chunk 生成后续 Milvus 检索需要的向量。
+
+### 一句话总结
+
+第 8 步用轻量、安全且经过真实调用验证的通义千问 JSON 接口识别商品全名，并把可信来源标记和名称写回了全部知识片段。

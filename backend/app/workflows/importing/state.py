@@ -14,6 +14,7 @@ class DocumentChunk(TypedDict, total=False):
     file_title: str
     content: str
     part: int
+    item_name: str
 
 
 class ImportGraphState(TypedDict, total=False):
@@ -33,6 +34,8 @@ class ImportGraphState(TypedDict, total=False):
     chunks: list[DocumentChunk]
     chunks_path: str
     item_name: str
+    item_name_source: Literal["", "qwen", "file_title_fallback"]
+    item_name_chunks_path: str
     embeddings: list[list[float]]
     milvus_ids: list[str]
     completed_nodes: list[str]
@@ -53,6 +56,8 @@ DEFAULT_IMPORT_STATE: ImportGraphState = {
     "chunks": [],
     "chunks_path": "",
     "item_name": "",
+    "item_name_source": "",
+    "item_name_chunks_path": "",
     "embeddings": [],
     "milvus_ids": [],
     "completed_nodes": [],

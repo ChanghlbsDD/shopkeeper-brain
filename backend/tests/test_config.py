@@ -61,3 +61,16 @@ def test_document_chunk_lengths_are_validated() -> None:
             document_chunk_max_length=200,
             document_chunk_min_length=200,
         )
+
+
+def test_qwen_item_name_defaults_and_limits() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.openai_api_base == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    assert settings.item_model == "qwen-flash"
+    assert settings.item_name_max_output_tokens == 128
+    assert settings.item_name_chunk_count == 3
+    assert settings.item_name_context_max_length == 2500
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, item_name_chunk_count=0)

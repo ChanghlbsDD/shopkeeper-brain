@@ -69,7 +69,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段。商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段。向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
@@ -117,6 +117,26 @@ DOCUMENT_CHUNK_BACKUP_ENABLED=true
 最终结果写入状态中的 `chunks`，每个片段包含 `title`、`parent_title`、`file_title` 和 `content`，超长章节还带有 `part` 序号。默认同时在 Markdown 旁生成 `*_chunks.json` 方便检查，该运行产物已被 Git 忽略；生产环境如不需要备份，可把 `DOCUMENT_CHUNK_BACKUP_ENABLED` 设为 `false`。
 
 文档切分是本地纯文本处理，不会调用 MinerU、通义千问、MinIO 或其他网络服务。
+
+## 通义千问商品名识别
+
+项目使用通义千问的 OpenAI 兼容 Chat Completions 接口和 JSON mode，不额外安装 OpenAI SDK 或 LangChain 模型客户端。开发环境配置为：
+
+```dotenv
+OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_API_KEY=只填写在本机
+ITEM_MODEL=qwen-flash
+LLM_DEFAULT_TEMPERATURE=0
+QWEN_REQUEST_TIMEOUT_SECONDS=60
+ITEM_NAME_MAX_OUTPUT_TOKENS=128
+ITEM_NAME_CHUNK_COUNT=3
+ITEM_NAME_CONTEXT_MAX_LENGTH=2500
+ITEM_NAME_BACKUP_ENABLED=true
+```
+
+节点最多选取前 3 个 chunk，并把上下文严格限制在 2500 字符以内。模型返回的 `item_name` 会写入工作流状态和每个 chunk，同时通过 `item_name_source` 标记来源是 `qwen` 还是 `file_title_fallback`。只有模型明确返回 `UNKNOWN` 时才使用文件名降级；密钥缺失、HTTP 错误或 JSON 格式错误会终止节点，避免把错误结果当成真实商品名。
+
+默认会在 Markdown 旁生成 `*_item_name_chunks.json` 供开发检查，该文件已被 Git 忽略。商品名识别会把文档标题和少量正文发送到阿里云百炼；处理敏感文档前需要确认数据合规要求。不同地域的 API 地址可能不同，部署时应按[阿里云百炼官方文档](https://help.aliyun.com/zh/model-studio/qwen-structured-output)调整 `OPENAI_API_BASE`。
 
 ## 目录职责
 

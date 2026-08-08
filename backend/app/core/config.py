@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     document_chunk_min_length: int = Field(default=200, ge=1, le=99_999)
     document_chunk_backup_enabled: bool = True
 
+    openai_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_api_key: str = ""
+    item_model: str = "qwen-flash"
+    llm_default_temperature: float = Field(default=0, ge=0, le=2)
+    qwen_request_timeout_seconds: float = Field(default=60, gt=0, le=600)
+    item_name_max_output_tokens: int = Field(default=128, ge=16, le=1024)
+    item_name_chunk_count: int = Field(default=3, ge=1, le=20)
+    item_name_context_max_length: int = Field(default=2500, ge=100, le=100_000)
+    item_name_backup_enabled: bool = True
+
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
         if self.document_chunk_max_length <= self.document_chunk_min_length:
