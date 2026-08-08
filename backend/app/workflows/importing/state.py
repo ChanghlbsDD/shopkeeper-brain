@@ -19,6 +19,7 @@ class ImportGraphState(TypedDict, total=False):
     md_path: str
     file_title: str
     md_content: str
+    uploaded_image_urls: dict[str, str]
     chunks: list[dict[str, object]]
     item_name: str
     embeddings: list[list[float]]
@@ -37,6 +38,7 @@ DEFAULT_IMPORT_STATE: ImportGraphState = {
     "md_path": "",
     "file_title": "",
     "md_content": "",
+    "uploaded_image_urls": {},
     "chunks": [],
     "item_name": "",
     "embeddings": [],

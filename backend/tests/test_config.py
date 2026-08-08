@@ -36,3 +36,11 @@ def test_mineru_timeout_and_model_version_are_validated() -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, mineru_model_version="unsupported")
+
+
+def test_minio_images_use_a_separate_public_bucket() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.minio_image_bucket_name == "shopkeeper-images"
+    assert settings.minio_public_base_url == "http://localhost:9000"
+    assert settings.minio_image_public_read is True

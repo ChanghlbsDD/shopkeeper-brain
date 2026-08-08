@@ -8,7 +8,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from app.workflows.importing.base import BaseNode
-from app.workflows.importing.nodes import EntryNode, PdfToMarkdownNode, PendingNode
+from app.workflows.importing.nodes import (
+    EntryNode,
+    MarkdownImageNode,
+    PdfToMarkdownNode,
+    PendingNode,
+)
 from app.workflows.importing.state import ImportGraphState, create_import_state
 
 ENTRY_NODE = "entry_node"
@@ -33,16 +38,14 @@ def route_import_file(state: ImportGraphState) -> Literal["pdf", "md"]:
 def create_import_workflow(
     *,
     pdf_to_md_node: BaseNode | None = None,
+    md_image_node: BaseNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
     graph = StateGraph(ImportGraphState)
     graph.add_node(ENTRY_NODE, EntryNode())
     graph.add_node(PDF_TO_MD_NODE, pdf_to_md_node or PdfToMarkdownNode())
-    graph.add_node(
-        MD_IMAGE_NODE,
-        PendingNode(MD_IMAGE_NODE, "后续处理 Markdown 图片并上传 MinIO"),
-    )
+    graph.add_node(MD_IMAGE_NODE, md_image_node or MarkdownImageNode())
     graph.add_node(
         DOCUMENT_SPLIT_NODE,
         PendingNode(DOCUMENT_SPLIT_NODE, "后续将 Markdown 切分为语义片段"),

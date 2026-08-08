@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     minio_access_key: str = "shopkeeper"
     minio_secret_key: str = "shopkeeper-minio-change-me"
     minio_bucket_name: str = "shopkeeper-knowledge"
+    minio_image_bucket_name: str = "shopkeeper-images"
+    minio_public_base_url: str = "http://localhost:9000"
+    minio_image_public_read: bool = True
     minio_secure: bool = False
 
     milvus_url: str = "http://localhost:19530"

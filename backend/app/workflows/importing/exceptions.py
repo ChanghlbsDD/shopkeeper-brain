@@ -33,3 +33,7 @@ class ImportNodeError(ImportWorkflowError):
 
 class PdfConversionError(ImportWorkflowError):
     """MinerU 无法把 PDF 转换为 Markdown。"""
+
+
+class MarkdownImageError(ImportWorkflowError):
+    """Markdown 图片路径校验、上传或链接替换失败。"""

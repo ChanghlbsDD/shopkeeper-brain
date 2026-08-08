@@ -937,3 +937,141 @@ Token 需要用户在 [MinerU API 管理页面](https://mineru.net/apiManage/tok
 ### 一句话总结
 
 第 5 步调整把 PDF 解析从本地重模型迁移为安全可测试的 MinerU 云端 API，并清除了约 2.09 GB 不再需要的本机文件。
+
+## 第 6 步：Markdown 图片上传与链接替换
+
+日期：2026-08-08
+
+### 本步目标
+
+把 `md_img_node` 从只记录顺序的占位节点替换为真实节点：读取 MinerU API 解压结果或用户 Markdown 中的本地图片引用，上传至 MinIO，并把 Markdown 中的本地地址替换为浏览器可访问的对象地址。
+
+本步只负责图片存储和链接替换，不调用通义千问生成图片语义摘要。这样可以先独立验证文件与对象存储链路；图片理解能力在需要时再作为单独步骤接入。
+
+### 与上一步的目录区别
+
+上一步没有专用的图片存储客户端，`md_img_node` 仍由 `PendingNode` 代替。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── clients/
+│   │   └── minio_storage.py                 # 新增
+│   └── workflows/importing/nodes/
+│       └── md_image.py                      # 新增
+└── tests/
+    ├── test_md_image_node.py                # 新增
+    └── test_minio_image_storage.py          # 新增
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── app/workflows/importing/state.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_state.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/minio_storage.py` | 创建独立图片桶、配置仅对象读取的公开策略、上传图片、识别 MIME 类型，并生成经过 URL 编码的公开地址。 |
+| `backend/app/workflows/importing/nodes/md_image.py` | 解析 Markdown 图片语法，校验本地路径，去重上传，替换图片地址并保存非破坏性的处理结果。 |
+| `backend/tests/test_md_image_node.py` | 验证本地与远程图片区分、重复引用去重、原文保留、异常路径拦截和存储错误转换。 |
+| `backend/tests/test_minio_image_storage.py` | 使用模拟 MinIO 客户端验证建桶、公开只读策略、上传参数、URL 编码和异常包装。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 增加图片桶、浏览器公开基地址和公开读取开关。 |
+| `backend/app/core/config.py` | 增加对应的三个 MinIO 图片配置项。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增 `MarkdownImageError`，让图片路径、上传和写入错误带有节点边界。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `MarkdownImageNode` 替换 `md_img_node` 占位实现，并保留测试注入入口。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 导出新的 Markdown 图片节点。 |
+| `backend/app/workflows/importing/state.py` | 增加 `uploaded_image_urls`，记录本地引用与对象地址的对应关系。 |
+| `backend/tests/test_config.py` | 验证图片桶默认配置。 |
+| `backend/tests/test_import_state.py` | 验证图片地址映射不会在不同任务状态之间共享。 |
+| `backend/README.md` | 增加图片节点的运行条件、配置方法、结果文件和公开访问安全说明。 |
+| `docs/development-log.md` | 记录第 6 步实现、目录变化、验证结果和下一步。 |
+
+### 节点执行流程
+
+```text
+读取 md_path
+  ↓
+解析 ![说明](图片地址)
+  ↓
+远程地址保持不变；本地地址执行路径和格式校验
+  ↓
+按真实文件去重，只上传 Markdown 实际引用的图片
+  ↓
+创建 shopkeeper-images 桶并设置仅 GetObject 的公开策略
+  ↓
+替换为 MINIO_PUBLIC_BASE_URL/桶名/对象名
+  ↓
+保存为 *_images.md，并更新 md_path、md_content、uploaded_image_urls
+```
+
+如果 Markdown 没有本地图片，节点只读取正文并继续，不会连接 MinIO。因此普通纯文本 Markdown 和不含图片的测试不要求 Docker 正在运行。
+
+### 文件与安全处理
+
+- 图片必须位于当前 Markdown 目录内部；绝对路径和 `../` 越界路径会直接拒绝，防止把服务器上的任意文件误传到对象存储。
+- 当前允许 JPG、JPEG、PNG、GIF、WebP 和 BMP；无法识别的本地格式不会被静默忽略。
+- 只上传正文实际引用的图片，不扫描并上传目录中的其他文件。
+- 同一真实图片即使使用两种相对路径重复引用，也只上传一次。
+- HTTP、HTTPS、Data URI 等远程地址保持不变。
+- 上传失败会抛出明确的 `MarkdownImageError`，不会假装处理成功后继续工作流。
+- 原始 Markdown 不覆盖；含本地图片时另存为 `*_images.md`。
+- 图片使用独立的 `shopkeeper-images` 桶并只公开对象读取权限，原始文档所在的知识桶不会因此公开。
+- 公开图片桶适合需要直接展示的非敏感文档图片；生产环境必须把公开基地址改为 HTTPS 域名或反向代理地址。
+
+### Python 与虚拟环境
+
+本步验证开始时发现原虚拟环境记录的基础解释器路径 `C:\Users\Lenovo\AppData\Local\Programs\Python\Python310` 已不存在，导致 `.venv` 启动器无法运行。已从 Python 官网恢复相同的 Python 3.10.11 运行时，原 `backend/.venv` 随即恢复可用，不需要把项目切换到 Python 3.13。
+
+最终确认：
+
+```text
+解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+环境前缀：D:\code\xm\掌柜智库\backend\.venv
+pip check：No broken requirements found
+```
+
+### 测试与验证
+
+- Ruff 格式检查通过，共检查 40 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 45 个测试：44 个通过，1 个 Docker 基础设施测试按开关跳过。
+- 总覆盖率为 87%；`minio_storage.py` 为 88%，`md_image.py` 为 93%。
+- 新测试覆盖建桶、只读策略、MIME 类型、中文及空格 URL 编码、本地图片去重、远程图片保留、缺失文件、不支持格式、目录越界和 MinIO 异常。
+- `pip check` 返回 `No broken requirements found`。
+- Docker Desktop 当前未启动，因此没有执行真实 MinIO 写入；MinIO SDK 边界由模拟客户端验证，真实基础设施测试仍保留为显式开启模式。
+- 本步没有调用 MinerU API，也没有消耗解析额度；已确认重启后的进程能够读取 `MINERU_API_TOKEN`，但没有输出或记录 Token 内容。
+
+### 当前边界
+
+- 当前图片替代文本沿用 Markdown 原值，尚未调用视觉模型生成图片说明。
+- 图片链接依赖 MinIO 或其反向代理可被最终浏览器访问。
+- 后续四个节点仍是占位节点：文档切分、商品名识别、向量化和 Milvus 写入。
+- 工作流仍未暴露为文档上传 HTTP API。
+
+### 下一步
+
+第 7 步将实现 `document_split_node`：按 Markdown 标题和内容结构生成适合后续检索、向量化的文档片段。
+
+### 一句话总结
+
+第 6 步把 Markdown 本地图片安全上传到独立 MinIO 图片桶并替换为公开地址，同时保留原始文档和完整上传映射。

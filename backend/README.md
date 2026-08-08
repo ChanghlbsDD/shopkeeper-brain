@@ -69,7 +69,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径。图片处理、文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址。文档切分、商品名识别、向量化和 Milvus 写入节点目前仍只记录执行顺序，后续步骤会逐个替换为真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
@@ -80,6 +80,20 @@ result = run_import_workflow(r"D:\docs\manual.pdf", file_dir=r"D:\docs\output")
 print(result["completed_nodes"])
 print(result["md_path"])
 ```
+
+## Markdown 图片处理
+
+图片节点使用独立的 `shopkeeper-images` 桶，不会把原始 PDF 或其他私有对象所在的知识桶设为公开。开发环境配置为：
+
+```dotenv
+MINIO_IMAGE_BUCKET_NAME=shopkeeper-images
+MINIO_PUBLIC_BASE_URL=http://localhost:9000
+MINIO_IMAGE_PUBLIC_READ=true
+```
+
+处理含本地图片的 Markdown 前需要启动 MinIO。节点只上传 Markdown 实际引用且位于 Markdown 目录内的 JPG、JPEG、PNG、GIF、WebP 或 BMP 文件；远程图片保持不变，重复引用只上传一次。处理结果保存为同目录下的 `*_images.md`，原文件保持不变。
+
+图片桶默认允许匿名读取，以便浏览器和后续问答结果直接展示图片，因此不要上传包含敏感信息的图片。部署到服务器时，`MINIO_PUBLIC_BASE_URL` 必须改成浏览器能够访问的 HTTPS 域名或反向代理地址，不能填写仅容器内部可见的 `minio:9000`。
 
 ## 目录职责
 

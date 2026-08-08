@@ -6,9 +6,11 @@ def test_import_states_do_not_share_mutable_defaults() -> None:
     second = create_import_state("second.pdf")
 
     first["chunks"].append({"text": "only in first"})
+    first["uploaded_image_urls"]["images/test.png"] = "https://example.com/test.png"
     first["node_durations_ms"]["entry_node"] = 1.0
 
     assert second["chunks"] == []
+    assert second["uploaded_image_urls"] == {}
     assert second["node_durations_ms"] == {}
 
 
