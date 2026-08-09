@@ -58,6 +58,8 @@ cd backend
 启动后可访问：
 
 - 健康检查：`http://localhost:8000/api/health`
+- 文档导入：`POST http://localhost:8000/api/imports`
+- 知识召回：`POST http://localhost:8000/api/queries/search`
 - Swagger API 文档：`http://localhost:8000/docs`
 
 首次创建虚拟环境、测试和代码检查命令见 [`backend/README.md`](backend/README.md)。

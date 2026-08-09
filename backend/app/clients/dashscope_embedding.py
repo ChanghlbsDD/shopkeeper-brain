@@ -48,12 +48,27 @@ class DashScopeEmbeddingClient:
     def embed_documents(self, texts: list[str]) -> list[TextEmbedding]:
         """以 document 类型向量化一批底库文本。"""
 
+        return self._embed_texts(texts, text_type="document")
+
+    def embed_queries(self, texts: list[str]) -> list[TextEmbedding]:
+        """以 query 类型向量化一批用户查询。"""
+
+        return self._embed_texts(texts, text_type="query")
+
+    def _embed_texts(
+        self,
+        texts: list[str],
+        *,
+        text_type: str,
+    ) -> list[TextEmbedding]:
+        """向百炼发送 document 或 query 类型的混合向量请求。"""
+
         normalized_texts = self._validate_inputs(texts)
         request_body = {
             "model": self.model,
             "input": {"texts": normalized_texts},
             "parameters": {
-                "text_type": "document",
+                "text_type": text_type,
                 "dimension": self.dimension,
                 "output_type": "dense&sparse",
             },

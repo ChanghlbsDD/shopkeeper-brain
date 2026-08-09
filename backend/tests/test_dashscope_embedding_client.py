@@ -74,6 +74,23 @@ def test_sends_dense_and_sparse_document_embedding_request() -> None:
     assert result[1].dense_vector == [0.4, 0.5, 0.6]
 
 
+def test_query_embedding_uses_query_text_type() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.read())
+        payload = embedding_payload()
+        payload["output"]["embeddings"] = payload["output"]["embeddings"][:1]  # type: ignore[index]
+        return httpx.Response(200, json=payload)
+
+    result = create_client(handler).embed_queries(["怎么测量直流电压？"])
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["parameters"]["text_type"] == "query"
+    assert result[0].dense_vector == [0.1, 0.2, 0.3]
+
+
 @pytest.mark.parametrize(
     ("overrides", "texts", "message"),
     [

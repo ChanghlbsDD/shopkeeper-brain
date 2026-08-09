@@ -2215,3 +2215,195 @@ npm audit：0 vulnerabilities
 ### 一句话总结
 
 第 12 步用经过类型、测试和生产构建验证的 Vue 3 工作台替换了课程静态导入页，让多文件上传、节点轮询、结果展示和错误恢复形成了完整前端闭环。
+
+## 第 13 步：知识查询骨架与 Milvus 混合召回 API
+
+日期：2026-08-09
+
+### 本步目标
+
+进入课程 day09 的查询链路，把原课程中尚未实现的 `vector_search` 空节点补成可调用的最小召回闭环。本步建立独立查询状态和 LangGraph，依次完成商品名称提取与问题改写、百炼查询向量生成、Milvus 稠密与稀疏向量混合召回，并通过 FastAPI 暴露稳定数据契约。
+
+本步只负责“找到回答可能需要的知识片段”，不提前实现 HyDE、网页搜索、RRF、重排序或最终答案生成，以便后续逐层验证每一种召回与排序策略。
+
+### 与上一步的目录区别
+
+上一步只有完整的文档导入后端和 Vue 导入页面，后端没有查询状态、查询节点、查询服务或查询 API。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── api/routes/
+│   │   └── queries.py
+│   ├── clients/
+│   │   └── milvus_search.py
+│   ├── schemas/
+│   │   └── queries.py
+│   ├── services/
+│   │   └── query_service.py
+│   └── workflows/querying/
+│       ├── __init__.py
+│       ├── base.py
+│       ├── exceptions.py
+│       ├── graph.py
+│       ├── prompts.py
+│       ├── state.py
+│       └── nodes/
+│           ├── __init__.py
+│           ├── item_name_confirm.py
+│           ├── query_embedding.py
+│           └── vector_search.py
+└── tests/
+    ├── integration/
+    │   └── test_query_search.py
+    ├── test_milvus_search.py
+    ├── test_query_api.py
+    ├── test_query_nodes.py
+    └── test_query_workflow.py
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/api/routes/queries.py` | 注册 `POST /api/queries/search`，通过依赖注入调用查询服务。 |
+| `backend/app/clients/milvus_search.py` | 创建两路 `AnnSearchRequest`、参数化商品名过滤、执行 `WeightedRanker` 混合检索，并把 Milvus 响应解析为安全结果。 |
+| `backend/app/schemas/queries.py` | 定义问题、历史消息、结果数量、召回片段和完整响应的 Pydantic 契约。 |
+| `backend/app/services/query_service.py` | 把 API 请求转换为图状态，运行查询工作流，并把节点异常映射为统一 HTTP 错误。 |
+| `backend/app/workflows/querying/__init__.py` | 对外导出查询状态、工作流创建器和运行入口。 |
+| `backend/app/workflows/querying/base.py` | 为查询节点统一记录日志、执行耗时、完成顺序和异常边界。 |
+| `backend/app/workflows/querying/exceptions.py` | 区分输入、商品名确认、查询向量和 Milvus 搜索错误。 |
+| `backend/app/workflows/querying/graph.py` | 编排三个查询节点并提供同步 `run_query_workflow` 入口。 |
+| `backend/app/workflows/querying/prompts.py` | 保存商品名提取、指代消解和独立问题改写的 JSON 提示词。 |
+| `backend/app/workflows/querying/state.py` | 定义历史消息、查询向量、召回结果和节点耗时等共享状态，并创建隔离的默认状态。 |
+| `backend/app/workflows/querying/nodes/__init__.py` | 集中导出三个查询节点，简化图模块导入。 |
+| `backend/app/workflows/querying/nodes/item_name_confirm.py` | 使用通义千问结合最近历史消息提取、去重商品名并改写问题。 |
+| `backend/app/workflows/querying/nodes/query_embedding.py` | 使用百炼 `query` 类型生成一组稠密和稀疏查询向量。 |
+| `backend/app/workflows/querying/nodes/vector_search.py` | 校验图状态并调用 Milvus 混合检索客户端返回相关知识片段。 |
+| `backend/tests/integration/test_query_search.py` | 在显式开关下真实调用通义千问、百炼和本地 Milvus，默认不消耗 API 额度。 |
+| `backend/tests/test_milvus_search.py` | 验证两路请求、参数化过滤、结果解析、空集合和异常输入。 |
+| `backend/tests/test_query_api.py` | 验证接口响应不泄露向量、请求约束、统一错误和 OpenAPI 契约。 |
+| `backend/tests/test_query_nodes.py` | 分别验证历史截断、商品名清洗、问题降级、查询向量和搜索参数传递。 |
+| `backend/tests/test_query_workflow.py` | 验证三个节点按顺序执行并累积状态和耗时。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `.env.example` | 删除没有实际独立服务的 `QUERY_API_PORT`，增加查询数量、权重、历史和商品名配置。 |
+| `README.md` | 在后端访问地址中补充导入与知识召回 API。 |
+| `backend/README.md` | 增加查询 API、PowerShell 示例、环境配置、数据边界和真实测试额度说明。 |
+| `backend/app/api/router.py` | 把查询路由并入现有 `/api` 主路由。 |
+| `backend/app/clients/dashscope_embedding.py` | 在原有 `document` 向量接口之外新增 `query` 类型入口，共用请求与响应校验。 |
+| `backend/app/core/config.py` | 增加查询限制、混合权重、历史上下文和商品名输出配置，并禁止两种权重同时为零。 |
+| `backend/tests/test_config.py` | 增加查询默认配置与权重校验测试。 |
+| `backend/tests/test_dashscope_embedding_client.py` | 验证查询向量请求确实发送 `text_type=query`。 |
+
+### 查询流程
+
+```text
+START
+  ↓
+item_name_confirm_node
+  ├─ 读取当前问题和最多 10 条客户端历史消息
+  ├─ 通义千问提取并去重 item_names
+  └─ 生成 rewritten_query
+  ↓
+query_embedding_node
+  └─ 百炼 text-embedding-v4（text_type=query）
+       ├─ dense vector
+       └─ sparse vector
+  ↓
+vector_search_node
+  ├─ dense_vector / COSINE ─┐
+  ├─ sparse_vector / IP ────┤→ WeightedRanker → Top K chunks
+  └─ item_name 参数化过滤 ─┘
+  ↓
+END
+```
+
+入库继续使用 `text_type=document`，查询改用 `text_type=query`。两端仍使用同一个 `text-embedding-v4` 模型和相同维度，防止查询向量与底库向量空间不一致。百炼官方文档也将两种文本类型分别定义为用户查询与底库文档：[百炼向量化文档](https://help.aliyun.com/zh/model-studio/embedding)。
+
+Milvus 每次混合检索创建一个稠密请求和一个稀疏请求，再用权重 `0.6 / 0.4` 合并归一化分数。每个权重与一个 ANN 请求对应，做法参考 [Milvus Hybrid Search](https://milvus.io/docs/multi-vector-search.md) 和 [Milvus Reranking](https://milvus.io/docs/reranking.md)。
+
+### HTTP 数据契约
+
+请求示例：
+
+```json
+{
+  "query": "它怎么测量直流电压？",
+  "history": [
+    {
+      "role": "assistant",
+      "content": "这是 RS-12 数字万用表。"
+    }
+  ],
+  "limit": 5
+}
+```
+
+响应只包含前端后续生成回答需要的检索摘要：
+
+```json
+{
+  "original_query": "它怎么测量直流电压？",
+  "rewritten_query": "RS-12 数字万用表如何测量直流电压？",
+  "item_names": ["RS-12 数字万用表"],
+  "matches": [
+    {
+      "chunk_id": 42,
+      "score": 0.91,
+      "content": "将量程旋钮转到直流电压档。",
+      "title": "直流电压测量",
+      "parent_title": "基本测量",
+      "file_title": "RS-12 用户手册",
+      "item_name": "RS-12 数字万用表",
+      "part": 1
+    }
+  ],
+  "completed_nodes": [
+    "item_name_confirm_node",
+    "query_embedding_node",
+    "vector_search_node"
+  ],
+  "node_durations_ms": {}
+}
+```
+
+稠密向量和稀疏向量只在工作流内部传递，不会进入 HTTP 响应。外部服务错误不会返回响应正文、Token、连接串或 Python 堆栈。
+
+### 输入、过滤与错误边界
+
+- 问题会去除首尾空白，不能为空且最多 2000 字符。
+- 历史消息只允许 `user` 和 `assistant`，最多 10 条，每条最多 2000 字符；额外字段直接拒绝。
+- 返回数量只能是 1～20，默认 5。
+- 商品名会去空白、忽略大小写去重，并受数量和单项长度限制。
+- 有商品名时使用 `item_name in {item_names}` 和 `expr_params`，不把用户文本拼接进 Milvus 表达式。
+- 没有识别到商品名时仍可在全部知识片段中搜索。
+- 集合尚未建立返回 `QUERY_KNOWLEDGE_EMPTY`；AI、Milvus 和其他工作流错误使用不同统一错误码。
+
+### 测试与验证
+
+- Ruff 对 `app` 和 `tests` 的静态检查通过。
+- Pytest 共 196 个测试通过，4 个真实集成测试按开关跳过。
+- 新测试覆盖 query/document 向量类型差异、商品名清洗、历史截断、混合请求、参数化过滤、工作流顺序、HTTP 契约和安全错误。
+- `python -m compileall` 通过，新增模块均可正常导入。
+- 本机只读检查确认当前 `knowledge_chunks` 集合尚不存在，因此没有强行调用真实通义千问和百炼，也没有消耗 Token 额度；先通过导入页面成功导入文档后，才具备真实查询条件。
+- 真实链路测试必须显式设置 `RUN_INTEGRATION_TESTS=1`，并会使用本机 `.env` 中的 Token 和本地 Docker 基础设施。
+
+### 当前边界
+
+- 本步“商品名确认”是基于 LLM 的提取与改写，还没有把近似名称与知识库中的标准商品名做候选对齐；如果模型返回名称与入库名称不完全一致，精确商品过滤可能得到空结果。
+- 历史消息由客户端随请求传入，尚未写入或读取 MongoDB。
+- API 当前同步返回召回结果，没有 SSE 流式进度，也没有异步查询任务状态。
+- 还没有 HyDE、网页搜索、RRF、多路融合、重排序和答案生成，因此 `matches` 是初步混合召回结果，不是最终答案依据顺序。
+- 当前本地没有 `knowledge_chunks` 集合；需要先从 Vue 导入页上传至少一份文档。
+
+### 下一步
+
+第 14 步将完成商品名称候选对齐与澄清分支：从知识库标准名称中匹配 LLM 提取结果，在名称不明确时返回候选项，并开始用 MongoDB 保存会话消息，为后续多轮知识问答做好状态基础。
+
+### 一句话总结
+
+第 13 步打通了商品名提取、查询向量生成、Milvus 稠密稀疏混合召回和 FastAPI 数据契约，让项目第一次具备了从用户问题安全检索知识片段的后端能力。

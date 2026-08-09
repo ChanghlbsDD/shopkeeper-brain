@@ -84,10 +84,20 @@ class Settings(BaseSettings):
     embedding_request_timeout_seconds: float = Field(default=60, gt=0, le=600)
     embedding_backup_enabled: bool = True
 
+    query_search_limit: int = Field(default=5, ge=1, le=20)
+    query_dense_weight: float = Field(default=0.6, ge=0, le=1)
+    query_sparse_weight: float = Field(default=0.4, ge=0, le=1)
+    query_history_max_messages: int = Field(default=10, ge=0, le=10)
+    query_history_context_max_length: int = Field(default=4000, ge=100, le=50_000)
+    query_item_name_max_count: int = Field(default=5, ge=1, le=20)
+    query_item_name_max_output_tokens: int = Field(default=256, ge=32, le=2048)
+
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
         if self.document_chunk_max_length <= self.document_chunk_min_length:
             raise ValueError("DOCUMENT_CHUNK_MAX_LENGTH 必须大于 DOCUMENT_CHUNK_MIN_LENGTH")
+        if self.query_dense_weight + self.query_sparse_weight <= 0:
+            raise ValueError("查询稠密和稀疏向量权重不能同时为 0")
         return self
 
     @property

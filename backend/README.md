@@ -1,6 +1,6 @@
 # Backend
 
-掌柜智库后端使用 Python 3.10、FastAPI 和 Pydantic Settings。当前提供统一配置、日志、异常响应、基础设施客户端、健康检查，以及基于 LangGraph 的文档导入流程。
+掌柜智库后端使用 Python 3.10、FastAPI 和 Pydantic Settings。当前提供统一配置、日志、异常响应、基础设施客户端、健康检查，以及基于 LangGraph 的文档导入和知识召回流程。
 
 ## 创建虚拟环境
 
@@ -42,7 +42,7 @@ cd backend
 .\.venv\Scripts\python.exe -m ruff check app tests
 ```
 
-真实基础设施集成测试默认跳过，需要五个 Docker 服务运行并显式开启：
+真实基础设施集成测试默认跳过，需要五个 Docker 服务运行并显式开启。查询集成测试还会调用通义千问和百炼并消耗少量 API 额度：
 
 ```powershell
 $env:RUN_INTEGRATION_TESTS='1'
@@ -114,6 +114,48 @@ IMPORT_SOURCE_ARCHIVE_ENABLED=true
 上传文件按 1 MiB 分块写入 Git 已忽略的任务目录，不会一次性读入内存。服务不信任客户端 MIME 类型：PDF 必须包含 PDF 文件头，Markdown 必须是无 NUL 字节的 UTF-8 文本；原始文件名只用于显示，磁盘和 MinIO 都使用后端生成的任务路径，避免路径穿越。启用原件归档时，源文件会写入私有 `shopkeeper-knowledge` 桶；文档图片仍使用单独的公开图片桶。
 
 任务状态只保存节点名称、耗时、片段数、商品名和 Milvus 集合名，不把正文、向量、服务器路径或异常堆栈返回给前端。当前任务表和 FastAPI `BackgroundTasks` 都在单个后端进程中：服务重启会丢失任务状态，多 worker 之间也不共享状态，因此生产部署前需要替换为 MongoDB 持久化和独立任务队列。
+
+## 知识召回 HTTP API
+
+当前查询流程按顺序执行三个节点：通义千问根据问题和最近历史消息确认商品名并改写问题，百炼以 `query` 类型生成稠密与稀疏向量，Milvus 使用 `WeightedRanker` 融合两路召回结果。此阶段只返回检索片段，尚不生成最终答案。
+
+| 方法 | 地址 | 作用 |
+| --- | --- | --- |
+| POST | `/api/queries/search` | 确认商品名、改写问题并返回 Milvus 混合召回片段。 |
+
+PowerShell 示例：
+
+```powershell
+$body = @{
+  query = '它怎么测量直流电压？'
+  history = @(
+    @{ role = 'assistant'; content = '这是 RS-12 数字万用表。' }
+  )
+  limit = 5
+} | ConvertTo-Json -Depth 4
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/api/queries/search `
+  -ContentType 'application/json' `
+  -Body $body
+```
+
+查询配置：
+
+```dotenv
+QUERY_SEARCH_LIMIT=5
+QUERY_DENSE_WEIGHT=0.6
+QUERY_SPARSE_WEIGHT=0.4
+QUERY_HISTORY_MAX_MESSAGES=10
+QUERY_HISTORY_CONTEXT_MAX_LENGTH=4000
+QUERY_ITEM_NAME_MAX_COUNT=5
+QUERY_ITEM_NAME_MAX_OUTPUT_TOKENS=256
+```
+
+识别到商品名称时，Milvus 使用参数化表达式 `item_name in {item_names}` 限制召回范围，避免直接拼接用户内容；没有识别到商品名时则在全部知识片段中检索。API 最多接收 10 条历史消息、每条 2000 字符，结果数量限制为 1～20。响应会返回原问题、改写问题、商品名、片段正文与来源标题、融合分数和节点耗时，但不会返回查询向量、Token 或异常堆栈。
+
+查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 
 ## Markdown 图片处理
 
@@ -218,5 +260,5 @@ MILVUS_BACKUP_ENABLED=true
 - `app/core`：配置、日志和统一异常。
 - `app/schemas`：请求与响应模型。
 - `app/services`：后续导入、查询和历史记录业务编排。
-- `app/workflows`：文档导入与后续问答查询 LangGraph；当前包含可运行的导入流程骨架。
+- `app/workflows`：文档导入与知识查询 LangGraph；当前包含可运行的导入和混合召回流程。
 - `tests`：单元测试和真实基础设施集成测试。

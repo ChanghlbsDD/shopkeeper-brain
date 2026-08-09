@@ -118,3 +118,20 @@ def test_milvus_import_defaults_and_limits() -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, milvus_insert_batch_size=1001)
+
+
+def test_query_defaults_and_vector_weights_are_validated() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.query_search_limit == 5
+    assert settings.query_dense_weight == 0.6
+    assert settings.query_sparse_weight == 0.4
+    assert settings.query_history_max_messages == 10
+    assert settings.query_item_name_max_count == 5
+
+    with pytest.raises(ValidationError, match="不能同时为 0"):
+        Settings(
+            _env_file=None,
+            query_dense_weight=0,
+            query_sparse_weight=0,
+        )
