@@ -1773,3 +1773,243 @@ PyMilvus 继续使用项目已经固定的 2.6.17，没有重复下载 Python、
 ### 一句话总结
 
 第 10 步把向量化后的知识片段可靠地批量写入了带稠密与稀疏索引的 Milvus，并把数据库自动主键回填到完整导入工作流。
+
+## 第 11 步：文档上传与导入任务 HTTP API
+
+日期：2026-08-09
+
+### 本步目标
+
+把前十步完成的七节点文档导入工作流封装成可供前端调用的 FastAPI Web 层：客户端上传一个 PDF 或 Markdown 后立即获得任务 ID，再通过状态接口轮询节点进度和最终结果摘要。
+
+课程在这一阶段使用 `UploadFile + BackgroundTasks + 进程内任务字典`。本项目保留相同的交互方式，方便下一步 Vue 页面直接对接，同时补充流式大小限制、内容基础校验、安全存储名、私有 MinIO 原件归档、线程安全任务表、统一错误结构和结果脱敏。
+
+### 与上一步的目录区别
+
+上一步只能从 Python 调用 `run_import_workflow()`，浏览器和 Vue 尚无上传入口。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── api/routes/
+│   │   └── imports.py                         # 新增
+│   ├── clients/
+│   │   └── minio_document_storage.py          # 新增
+│   ├── schemas/
+│   │   └── imports.py                         # 新增
+│   └── services/
+│       ├── __init__.py                        # 新增
+│       ├── import_files.py                    # 新增
+│       └── import_tasks.py                    # 新增
+└── tests/
+    ├── integration/
+    │   └── test_import_upload.py              # 新增
+    ├── test_import_api.py                     # 新增
+    ├── test_import_file_service.py            # 新增
+    ├── test_import_tasks.py                   # 新增
+    └── test_minio_document_storage.py         # 新增
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/api/router.py
+│   ├── app/core/config.py
+│   ├── app/main.py
+│   ├── app/workflows/importing/base.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/state.py
+│   ├── requirements.txt
+│   ├── tests/test_config.py
+│   ├── tests/test_import_nodes.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/api/routes/imports.py` | 提供 `POST /api/imports` 和 `GET /api/imports/{task_id}`，使用依赖注入调用服务，并把耗时工作流安排到响应后的后台任务。 |
+| `backend/app/clients/minio_document_storage.py` | 将原始 PDF/Markdown 写入私有知识桶，校验对象名，按扩展名设置 MIME 类型，不生成公开 URL 或公开桶策略。 |
+| `backend/app/schemas/imports.py` | 定义 HTTP 202 上传响应、任务状态响应和安全错误摘要，并负责把内部任务记录转换为外部数据契约。 |
+| `backend/app/services/__init__.py` | 建立后端业务服务包。 |
+| `backend/app/services/import_files.py` | 完成文件名与扩展名校验、分块落盘、文件内容基础校验、MinIO 归档、后台工作流运行、节点进度回调和失败脱敏。 |
+| `backend/app/services/import_tasks.py` | 用锁保护有上限的进程内任务表，记录任务状态、完成节点、当前节点、耗时和最终摘要，不保存正文或向量。 |
+| `backend/tests/integration/test_import_upload.py` | 通过真实 FastAPI multipart 请求上传合成 Markdown，确认原件真实进入 Docker MinIO、后台任务完成，并在测试后删除对象。 |
+| `backend/tests/test_import_api.py` | 验证 HTTP 202、轮询响应、统一 404/415 错误、结果脱敏和 OpenAPI multipart 描述。 |
+| `backend/tests/test_import_file_service.py` | 验证安全文件名、分块大小限制、PDF 文件头、UTF-8 Markdown、原件归档、失败清理、工作流成功与异常脱敏。 |
+| `backend/tests/test_import_tasks.py` | 验证任务生命周期、节点进度、结果摘要、失败状态、快照隔离、终态任务淘汰和容量保护。 |
+| `backend/tests/test_minio_document_storage.py` | 验证私有知识桶创建、文档 MIME、对象名检查和 MinIO 异常包装。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 增加上传存储目录、最大文件大小、内存任务保留数和原件归档开关。 |
+| `backend/app/api/router.py` | 把导入路由挂载到统一 `/api` 路由。 |
+| `backend/app/core/config.py` | 加载并限制导入 Web 层四项配置。 |
+| `backend/app/main.py` | 在根路径应用信息中公布 `/api/imports`。 |
+| `backend/app/workflows/importing/base.py` | 在每个节点开始和完成时触发可选进度回调；回调自身失败只记录日志，不破坏导入业务。 |
+| `backend/app/workflows/importing/graph.py` | 让 `run_import_workflow()` 接收并传递可选进度回调。 |
+| `backend/app/workflows/importing/state.py` | 给内部图状态增加进度事件和回调类型；未提供回调时原有 Python 调用保持不变。 |
+| `backend/requirements.txt` | 增加 FastAPI 解析 multipart 表单所需的 `python-multipart==0.0.32`。 |
+| `backend/tests/test_config.py` | 验证上传配置默认值和边界。 |
+| `backend/tests/test_import_nodes.py` | 验证真实节点会依次发出 started、completed 事件和毫秒耗时。 |
+| `backend/README.md` | 增加接口、PowerShell 调用、配置、安全校验、存储策略和部署边界说明。 |
+| `docs/development-log.md` | 记录第 11 步实现、目录差异、依赖和真实 HTTP/MinIO 验证。 |
+
+### HTTP 交互流程
+
+```text
+Vue / Swagger 选择 PDF 或 Markdown
+  ↓
+POST /api/imports（multipart/form-data）
+  ↓
+校验文件名和扩展名，生成 32 位随机 task_id
+  ↓
+按 1 MiB 分块写入 backend/temp_data/imports/日期/task_id/source.ext
+  ↓
+检查真实大小、PDF 文件头或 UTF-8 Markdown
+  ↓
+按配置归档到私有 MinIO：imports/日期/task_id/source.ext
+  ↓
+返回 HTTP 202、task_id 和 status_url
+  ↓
+FastAPI BackgroundTasks 在响应后运行七节点 LangGraph
+  ↓
+每个节点通过回调更新 started、completed 和 duration_ms
+  ↓
+Vue 每隔约 1～2 秒 GET /api/imports/{task_id}
+  ↓
+completed：展示片段数、商品名、Milvus 集合
+failed：展示安全的节点名和业务错误
+```
+
+### API 数据契约
+
+上传请求：
+
+```http
+POST /api/imports
+Content-Type: multipart/form-data
+file=<一个 PDF、MD 或 Markdown>
+```
+
+成功接收返回 HTTP 202：
+
+```json
+{
+  "message": "文件已接收，正在后台导入",
+  "task_id": "c5b73b2397ef469bb5345f5520d60d90",
+  "status": "queued",
+  "filename": "产品手册.md",
+  "status_url": "/api/imports/c5b73b2397ef469bb5345f5520d60d90"
+}
+```
+
+轮询结果：
+
+```json
+{
+  "task_id": "c5b73b2397ef469bb5345f5520d60d90",
+  "filename": "产品手册.md",
+  "status": "completed",
+  "done_nodes": ["upload_file", "entry_node", "md_img_node", "document_split_node"],
+  "running_node": null,
+  "node_durations_ms": {"entry_node": 1.25},
+  "chunk_count": 12,
+  "item_name": "RS-12 数字万用表",
+  "milvus_collection_name": "knowledge_chunks",
+  "error": null,
+  "created_at": "2026-08-09T08:00:00Z",
+  "updated_at": "2026-08-09T08:00:06Z"
+}
+```
+
+任务状态固定为：
+
+| 状态 | 含义 |
+| --- | --- |
+| `queued` | 文件已经安全保存，等待后台工作流开始。 |
+| `processing` | 工作流正在执行，`running_node` 指向当前节点。 |
+| `completed` | Milvus 入库完成，响应包含安全结果摘要。 |
+| `failed` | 某节点失败，响应包含节点名和经过控制的错误说明。 |
+
+### 文件与响应安全
+
+- 不使用客户端文件名构造磁盘路径或 MinIO 对象名；原文件统一保存为任务目录内的 `source.ext`，防止 `../` 和绝对路径穿越。
+- 不相信客户端声明的 MIME 类型；PDF 要求 `%PDF-` 文件头，Markdown 要求 UTF-8 且不能含 NUL 字节。
+- 读取和写入按 1 MiB 分块进行，实际累计字节超过上限立即终止并删除未完成任务目录。
+- 空文件、伪造 PDF、非 UTF-8 Markdown、不支持扩展名分别返回明确的 400、413 或 415 业务错误。
+- 原始文件进入默认私有知识桶；只有正文实际引用的文档图片仍按第 6 步进入独立公开图片桶。
+- 状态接口不返回文档正文、向量、服务器本地路径、MinIO 内部对象名、异常原因链或堆栈。
+- 任务表只保留摘要；达到上限时先淘汰最早的完成或失败任务，不会淘汰正在排队或处理的任务。
+
+### 为什么当前使用 BackgroundTasks 和轮询
+
+课程导入节点少、单节点耗时较长且状态变化频率低，前端每 1～2 秒轮询一次比维护 SSE 长连接更简单。FastAPI 官方也把“接收文件后返回 HTTP 202，再在后台处理”列为 `BackgroundTasks` 的典型用法：
+
+- [FastAPI：Request Files](https://fastapi.tiangolo.com/tutorial/request-files/)
+- [FastAPI：Background Tasks](https://fastapi.tiangolo.com/tutorial/background-tasks/)
+
+但官方同时提示，重型后台工作更适合 Celery 一类独立任务工具。当前实现是为了先完成课程的单机开发闭环，不把它误当成可横向扩容的生产任务系统。
+
+### 配置
+
+公开配置模板新增：
+
+```dotenv
+IMPORT_STORAGE_DIR=backend/temp_data/imports
+IMPORT_MAX_FILE_SIZE_MB=200
+IMPORT_TASK_RETENTION=1000
+IMPORT_SOURCE_ARCHIVE_ENABLED=true
+```
+
+`IMPORT_STORAGE_DIR` 的相对路径按仓库根目录解析，目录已经被 Git 忽略。200 MB 与当前 MinerU PDF API 单文件限制保持一致；服务仍会按实际读取字节再次限制，不能依赖客户端上报大小。
+
+### Python、依赖与虚拟环境
+
+本步继续使用唯一的项目虚拟环境：
+
+```text
+项目解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+新增 Python 包：python-multipart==0.0.32
+新增本地 AI 模型：0
+pip check：No broken requirements found
+```
+
+FastAPI 官方说明接收 multipart 上传需要安装 `python-multipart`。选用检查时 PyPI 的最新稳定版 0.0.32，要求 Python 3.10 及以上。pip 23 在本机连接 PyPI 时发生 TLS 中断，因此从 PyPI 官方 `files.pythonhosted.org` 下载 wheel 到 Git 已忽略的 `.cache`，核对官方 SHA-256 `ff6d3f...1fe2e23` 完全一致后在 `.venv` 本地安装，没有使用第三方镜像或升级其他依赖：
+
+- [PyPI：python-multipart 0.0.32](https://pypi.org/project/python-multipart/)
+
+### 测试与真实 HTTP/MinIO 验证
+
+- Ruff 格式检查通过，共检查 68 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 176 个测试：默认模式 173 个通过，3 个 Docker 集成测试按开关跳过。
+- 总覆盖率为 88%；`import_files.py` 为 91%，`import_tasks.py` 为 95%，`imports.py` schema 为 94%。
+- `pip check` 返回 `No broken requirements found`。
+- 显式设置 `RUN_INTEGRATION_TESTS=1` 后，基础设施、Milvus 入库和 HTTP 上传三项真实集成测试全部通过。
+- HTTP 集成测试通过真实 multipart 请求上传不含隐私的合成 Markdown，确认本地文件、私有 MinIO 对象、HTTP 202、后台状态和结果摘要；测试结束后删除了 MinIO 对象和临时目录。
+- Web 层单元测试使用注入的无费用工作流，不调用 MinerU、通义千问或百炼，也不产生新的 Milvus 业务记录。
+
+### 当前边界
+
+- 任务状态只存在当前 FastAPI 进程内；服务重启会丢失状态，多个 Uvicorn worker 之间也不会共享任务。
+- `BackgroundTasks` 与 API 使用同一进程，不具备持久消息、自动重试、任务抢占或跨服务器调度能力；部署阶段需要独立任务队列。
+- 任务状态淘汰不会自动删除本地原件和 MinIO 原件，文件生命周期与定时清理策略尚未实现。
+- 当前没有认证和用户隔离，知道 task ID 的调用方即可查询摘要；对公网部署前必须增加登录鉴权和权限检查。
+- 重复上传同一文档仍会生成新的 Milvus 数据，文档去重和版本管理尚未实现。
+
+### 下一步
+
+第 12 步将创建 Vue 3 文档导入页面：选择或拖放 PDF/Markdown，调用 `POST /api/imports`，按任务 ID 轮询状态，并用节点进度、耗时、成功结果和失败提示完整展示导入过程。
+
+### 一句话总结
+
+第 11 步为完整导入工作流增加了安全的文件上传、私有原件归档和可轮询任务 API，让下一步 Vue 页面拥有了稳定的后端入口。

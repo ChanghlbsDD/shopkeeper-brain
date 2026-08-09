@@ -71,7 +71,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段；向量化节点会调用百炼云端 API 生成稠密和稀疏向量；最后由 Milvus 节点创建或校验集合及索引，批量写入知识片段并回填自动主键。当前七个导入节点均已实现真实业务。
 
-工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
+除 HTTP API 外，也可以在 Python 中直接调用工作流：
 
 ```python
 from app.workflows.importing import run_import_workflow
@@ -81,6 +81,39 @@ print(result["completed_nodes"])
 print(result["md_path"])
 print(result["chunks"])
 ```
+
+## 文档导入 HTTP API
+
+启动后端后，可以在 `http://localhost:8000/docs` 直接选择文件测试，也可以使用以下接口：
+
+| 方法 | 地址 | 作用 |
+| --- | --- | --- |
+| POST | `/api/imports` | 以 `multipart/form-data` 上传一个 PDF、MD 或 Markdown 文件，返回 HTTP 202 和任务 ID。 |
+| GET | `/api/imports/{task_id}` | 查询排队、处理、完成或失败状态，以及节点进度和安全结果摘要。 |
+
+PowerShell 示例：
+
+```powershell
+$result = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://localhost:8000/api/imports `
+  -Form @{ file = Get-Item 'D:\docs\manual.md' }
+
+Invoke-RestMethod -Uri "http://localhost:8000$($result.status_url)"
+```
+
+上传配置：
+
+```dotenv
+IMPORT_STORAGE_DIR=backend/temp_data/imports
+IMPORT_MAX_FILE_SIZE_MB=200
+IMPORT_TASK_RETENTION=1000
+IMPORT_SOURCE_ARCHIVE_ENABLED=true
+```
+
+上传文件按 1 MiB 分块写入 Git 已忽略的任务目录，不会一次性读入内存。服务不信任客户端 MIME 类型：PDF 必须包含 PDF 文件头，Markdown 必须是无 NUL 字节的 UTF-8 文本；原始文件名只用于显示，磁盘和 MinIO 都使用后端生成的任务路径，避免路径穿越。启用原件归档时，源文件会写入私有 `shopkeeper-knowledge` 桶；文档图片仍使用单独的公开图片桶。
+
+任务状态只保存节点名称、耗时、片段数、商品名和 Milvus 集合名，不把正文、向量、服务器路径或异常堆栈返回给前端。当前任务表和 FastAPI `BackgroundTasks` 都在单个后端进程中：服务重启会丢失任务状态，多 worker 之间也不共享状态，因此生产部署前需要替换为 MongoDB 持久化和独立任务队列。
 
 ## Markdown 图片处理
 

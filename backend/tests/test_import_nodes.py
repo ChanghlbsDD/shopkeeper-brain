@@ -65,3 +65,19 @@ def test_base_node_wraps_unexpected_errors() -> None:
     assert captured.value.node_name == "broken_node"
     assert isinstance(captured.value.cause, RuntimeError)
     assert str(captured.value) == "[broken_node] 节点执行失败"
+
+
+def test_base_node_reports_started_and_completed_progress(tmp_path: Path) -> None:
+    source = tmp_path / "manual.md"
+    source.write_text("# Manual", encoding="utf-8")
+    events: list[tuple[str, str, float | None]] = []
+    state = create_import_state(
+        str(source),
+        progress_callback=lambda event, node, duration: events.append((event, node, duration)),
+    )
+
+    EntryNode()(state)
+
+    assert events[0] == ("started", "entry_node", None)
+    assert events[1][0:2] == ("completed", "entry_node")
+    assert isinstance(events[1][2], float)

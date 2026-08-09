@@ -17,7 +17,11 @@ from app.workflows.importing.nodes import (
     MarkdownImageNode,
     PdfToMarkdownNode,
 )
-from app.workflows.importing.state import ImportGraphState, create_import_state
+from app.workflows.importing.state import (
+    ImportGraphState,
+    ImportProgressCallback,
+    create_import_state,
+)
 
 ENTRY_NODE = "entry_node"
 PDF_TO_MD_NODE = "pdf_to_md_node"
@@ -81,6 +85,7 @@ def run_import_workflow(
     *,
     file_dir: str = "",
     task_id: str = "",
+    progress_callback: ImportProgressCallback | None = None,
 ) -> ImportGraphState:
     """以初始状态运行一次导入流程骨架。"""
 
@@ -88,5 +93,6 @@ def run_import_workflow(
         import_file_path,
         file_dir=file_dir,
         task_id=task_id,
+        progress_callback=progress_callback,
     )
     return cast(ImportGraphState, import_workflow.invoke(initial_state))

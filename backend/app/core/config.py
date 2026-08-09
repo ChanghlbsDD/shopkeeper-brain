@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     log_level: str = "INFO"
     infra_health_timeout_seconds: float = Field(default=3.0, gt=0, le=30)
+    import_storage_dir: Path = REPOSITORY_ROOT / "backend" / "temp_data" / "imports"
+    import_max_file_size_mb: int = Field(default=200, ge=1, le=1024)
+    import_task_retention: int = Field(default=1000, ge=10, le=100_000)
+    import_source_archive_enabled: bool = True
 
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "shopkeeper"

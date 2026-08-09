@@ -25,6 +25,21 @@ def test_health_timeout_must_be_positive() -> None:
         Settings(_env_file=None, infra_health_timeout_seconds=0)
 
 
+def test_import_api_storage_and_limits() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.import_storage_dir.name == "imports"
+    assert settings.import_max_file_size_mb == 200
+    assert settings.import_task_retention == 1000
+    assert settings.import_source_archive_enabled is True
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, import_max_file_size_mb=0)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, import_task_retention=9)
+
+
 def test_mineru_timeout_and_model_version_are_validated() -> None:
     settings = Settings(_env_file=None, mineru_task_timeout_seconds=60)
 

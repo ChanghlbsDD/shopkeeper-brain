@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from time import perf_counter
 
 from app.workflows.importing.exceptions import ImportNodeError, ImportWorkflowError
-from app.workflows.importing.state import ImportGraphState
+from app.workflows.importing.state import ImportGraphState, ImportProgressEvent
 
 
 class BaseNode(ABC):
@@ -22,6 +22,7 @@ class BaseNode(ABC):
     def __call__(self, state: ImportGraphState) -> ImportGraphState:
         started_at = perf_counter()
         self.logger.info("Import node started: %s", self.name)
+        self._notify_progress(state, "started", None)
 
         try:
             updates = self.process(state)
@@ -49,6 +50,7 @@ class BaseNode(ABC):
         result["node_durations_ms"] = node_durations
 
         self.logger.info("Import node completed: %s (%.3f ms)", self.name, duration_ms)
+        self._notify_progress(state, "completed", duration_ms)
         return result
 
     @abstractmethod
@@ -57,3 +59,17 @@ class BaseNode(ABC):
 
     def log_step(self, step: str, message: str) -> None:
         self.logger.info("[%s] %s", step, message)
+
+    def _notify_progress(
+        self,
+        state: ImportGraphState,
+        event: ImportProgressEvent,
+        duration_ms: float | None,
+    ) -> None:
+        callback = state.get("_progress_callback")
+        if callback is None:
+            return
+        try:
+            callback(event, self.name, duration_ms)
+        except Exception:
+            self.logger.exception("Import progress callback failed: %s", self.name)

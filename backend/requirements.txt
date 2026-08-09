@@ -7,4 +7,5 @@ minio==7.2.20
 pydantic-settings==2.14.2
 pymilvus==2.6.17
 pymongo==4.17.0
+python-multipart==0.0.32
 uvicorn[standard]==0.52.1

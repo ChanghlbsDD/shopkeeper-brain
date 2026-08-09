@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Literal, TypedDict
+
+ImportProgressEvent = Literal["started", "completed"]
+ImportProgressCallback = Callable[[ImportProgressEvent, str, float | None], None]
 
 
 class DocumentChunk(TypedDict, total=False):
@@ -46,6 +50,7 @@ class ImportGraphState(TypedDict, total=False):
     milvus_chunks_path: str
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
+    _progress_callback: ImportProgressCallback
 
 
 DEFAULT_IMPORT_STATE: ImportGraphState = {
@@ -79,6 +84,7 @@ def create_import_state(
     *,
     file_dir: str = "",
     task_id: str = "",
+    progress_callback: ImportProgressCallback | None = None,
 ) -> ImportGraphState:
     """创建相互隔离的导入初始状态。"""
 
@@ -90,4 +96,6 @@ def create_import_state(
             "file_dir": file_dir,
         }
     )
+    if progress_callback is not None:
+        state["_progress_callback"] = progress_callback
     return state
