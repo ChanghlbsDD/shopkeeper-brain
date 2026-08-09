@@ -62,6 +62,18 @@ cd backend
 
 首次创建虚拟环境、测试和代码检查命令见 [`backend/README.md`](backend/README.md)。
 
+## 前端开发
+
+文档导入页面使用 Vue 3、TypeScript 和 Vite：
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+访问 `http://localhost:5173`。开发服务器会把 `/api` 请求代理到运行在 `127.0.0.1:8000` 的 FastAPI，因此应先启动后端。前端类型检查、测试、构建和环境变量说明见 [`frontend/README.md`](frontend/README.md)。
+
 ## 开发记录
 
 逐步还原过程、目录差异、文件职责和验证结果单独记录在 [`docs/development-log.md`](docs/development-log.md)，不与项目使用说明混写。

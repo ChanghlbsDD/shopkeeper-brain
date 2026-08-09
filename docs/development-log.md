@@ -2013,3 +2013,205 @@ FastAPI 官方说明接收 multipart 上传需要安装 `python-multipart`。选
 ### 一句话总结
 
 第 11 步为完整导入工作流增加了安全的文件上传、私有原件归档和可轮询任务 API，让下一步 Vue 页面拥有了稳定的后端入口。
+
+## 第 12 步：Vue 3 文档导入工作台
+
+日期：2026-08-09
+
+### 本步目标
+
+用 Vue 3、TypeScript 和 Vite 正式初始化前端工程，替换课程中的单文件 `import.html`，并对接第 11 步的文档上传与任务状态 API。
+
+页面需要完成完整用户闭环：选择或拖放 PDF/Markdown、在浏览器端预先排除明显无效文件、上传一个或多个任务、每 1.5 秒轮询状态、按实际分支展示节点时间线、显示耗时和最终入库摘要，并对后端业务错误与短暂断网给出可恢复反馈。
+
+### 与上一步的目录区别
+
+上一步结束时，`frontend` 只有一份规划说明，没有 `package.json`、源码、测试或构建配置。本步新增后的目录为：
+
+```text
+frontend/
+├── .env.example
+├── index.html
+├── package.json
+├── package-lock.json
+├── tsconfig.json
+├── vite.config.ts
+└── src/
+    ├── App.vue
+    ├── env.d.ts
+    ├── main.ts
+    ├── api/
+    │   ├── imports.ts
+    │   └── imports.spec.ts
+    ├── components/
+    │   ├── ImportTaskCard.vue
+    │   ├── ImportTaskCard.spec.ts
+    │   ├── PipelineOverview.vue
+    │   └── UploadDropzone.vue
+    ├── composables/
+    │   ├── useImportTasks.ts
+    │   └── useImportTasks.spec.ts
+    ├── styles/
+    │   └── main.css
+    ├── types/
+    │   └── imports.ts
+    └── utils/
+        ├── imports.ts
+        └── imports.spec.ts
+```
+
+同时修改以下已有文件：
+
+```text
+.
+├── README.md
+├── docs/development-log.md
+└── frontend/README.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `frontend/.env.example` | 提供可选公开 API 基址和本地 Vite 代理目标；只允许放浏览器可见配置，不放密钥。 |
+| `frontend/index.html` | 提供 Vue 挂载节点、中文语言、移动端 viewport、页面标题和产品描述。 |
+| `frontend/package.json` | 固定 Vue、Vite、TypeScript、类型检查和测试依赖，并定义开发、检查、测试、构建脚本。 |
+| `frontend/package-lock.json` | 锁定 178 个直接与传递依赖的精确版本和校验值，保证其他电脑安装结果一致。 |
+| `frontend/tsconfig.json` | 开启严格 TypeScript、DOM 类型、Vue/Vite 类型和无产物类型检查。 |
+| `frontend/vite.config.ts` | 加载 Vue 单文件组件插件，固定 5173 开发端口，把 `/api` 代理到 FastAPI，并配置 jsdom 测试环境。 |
+| `frontend/src/env.d.ts` | 声明 Vite 客户端和 `VITE_API_BASE_URL` 的类型。 |
+| `frontend/src/main.ts` | 创建 Vue 应用，挂载根组件并加载全局样式。 |
+| `frontend/src/App.vue` | 组合品牌页头、产品说明、上传区、处理路线、错误提示和任务记录，是导入页面入口。 |
+| `frontend/src/api/imports.ts` | 封装 multipart 上传和任务查询，安全编码 task ID，解析后端统一错误结构，并隐藏原始错误响应内容。 |
+| `frontend/src/api/imports.spec.ts` | 验证 FormData、接口路径、task ID 编码、后端业务错误和无效 JSON 响应。 |
+| `frontend/src/components/UploadDropzone.vue` | 提供可点击、可键盘操作、可拖放且支持多文件的 PDF/Markdown 选择区域。 |
+| `frontend/src/components/PipelineOverview.vue` | 用四个业务阶段解释从原件归档到 Milvus 入库的完整路线。 |
+| `frontend/src/components/ImportTaskCard.vue` | 展示单任务文件信息、状态、进度条、分支节点、单节点耗时、结果摘要、错误和重试操作。 |
+| `frontend/src/components/ImportTaskCard.spec.ts` | 验证完成结果、100% 进度、错误提示、重试事件及不显示向量字段。 |
+| `frontend/src/composables/useImportTasks.ts` | 管理多任务上传、1.5 秒轮询、AbortController 清理、连续断线重试、结果同步、重新导入和记录清理。 |
+| `frontend/src/composables/useImportTasks.spec.ts` | 验证上传后立即轮询、完成摘要回填，以及连续五次连接失败后停止请求。 |
+| `frontend/src/styles/main.css` | 实现掌柜智库专属的纸张、账册与墨绿色视觉，覆盖桌面、平板、手机、键盘焦点和减少动画偏好。 |
+| `frontend/src/types/imports.ts` | 定义后端响应、任务状态、前端视图任务、错误和节点数据结构。 |
+| `frontend/src/utils/imports.ts` | 定义 PDF/Markdown 两条节点路线、文件预校验、分支进度、大小和耗时格式化。 |
+| `frontend/src/utils/imports.spec.ts` | 验证两类路线、扩展名识别、空文件、200 MB 上限、进度上限和格式化结果。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `README.md` | 增加前端安装、启动地址、代理关系和前端说明入口。 |
+| `frontend/README.md` | 从规划文件改为可执行的安装、启动、检查、API 代理、功能和安全配置说明。 |
+| `docs/development-log.md` | 记录第 12 步目录差异、组件职责、交互、依赖选择和验证结果。 |
+
+### 页面交互流程
+
+```text
+点击“选择文件”或拖放多个文件
+  ↓
+逐个检查扩展名、空文件和 200 MB 上限
+  ├─ 无效：页面顶部显示具体文件错误，不发送请求
+  └─ 有效：立即创建本地“正在上传”任务卡
+  ↓
+POST /api/imports，FormData 字段名为 file
+  ↓
+收到 HTTP 202：记录 task_id，标记 upload_file 完成
+  ↓
+立即 GET /api/imports/{task_id}，之后每 1.5 秒轮询
+  ↓
+根据 done_nodes、running_node 和文件类型计算进度
+  ├─ PDF：上传 + 入口 + PDF 解析 + 后续五节点，共 8 步
+  └─ Markdown：跳过 PDF 解析，共 7 步
+  ↓
+completed：展示商品名、知识片段数、Milvus 集合和总节点耗时
+failed：展示后端安全错误，可用原 File 对象重新导入
+连续五次查询失败：停止轮询并显示连接中断，可重新导入
+```
+
+### 组件与状态分工
+
+```text
+App.vue
+├── UploadDropzone.vue          只负责文件交互，不直接请求 API
+├── PipelineOverview.vue        解释静态业务路线
+└── ImportTaskCard.vue          只根据一个任务状态渲染
+        ↑
+useImportTasks.ts               统一管理上传、轮询、重试和列表
+        ↓
+api/imports.ts                  统一管理 HTTP 地址、FormData 和错误
+        ↓
+FastAPI /api/imports
+```
+
+组件不直接拼接后端错误 HTML，所有内容使用 Vue 文本插值输出。API 层、状态层和展示层分开后，后续更换任务持久化方式或增加鉴权时不需要重写页面组件。
+
+### 视觉与可访问性
+
+- 没有照搬课程的深色科技模板；采用暖白纸张、墨绿、朱砂橙和账册网格，保持“掌柜智库”的业务辨识度。
+- 第一屏直接呈现产品价值、文件入口和处理路线，没有增加与当前功能无关的侧边栏或空导航。
+- 文件输入保留真实可访问标签；拖放之外始终提供普通按钮，不要求用户必须使用鼠标拖拽。
+- 进度条使用原生 `role=progressbar` 及数值属性，错误使用 `role=alert`，任务列表使用 `aria-live`。
+- 所有交互元素具有键盘焦点样式；窄屏把两栏改为单栏，任务时间线从四列降到两列。
+- 遵循 `prefers-reduced-motion`，用户减少动画时关闭脉冲和过渡。
+- 页面不请求外部字体、图片或统计脚本，离线开发环境也能完整显示。
+
+网站构建技能使本步在功能之外同步落实了产品首屏、移动端、键盘操作、状态提示和错误恢复。项目没有 `.openai/hosting.json`，且当前开发流程明确以本地和 GitHub 为阶段交付，因此没有提前创建外部托管站点；部署会在后续服务器步骤统一处理。
+
+### API 与环境配置
+
+默认开发模式使用同源相对地址 `/api`，由 Vite 代理到 FastAPI：
+
+```dotenv
+VITE_API_BASE_URL=
+VITE_PROXY_TARGET=http://127.0.0.1:8000
+```
+
+生产环境同域部署时仍可让 `VITE_API_BASE_URL` 保持为空。只有前后端分属不同域名时才填写公开 API 地址。所有 `VITE_*` 变量都会进入浏览器构建产物，禁止写入 Token、MinIO 密钥或数据库连接串。
+
+### Node、依赖与版本取舍
+
+本步使用现有 Node 环境，没有额外复制运行时：
+
+```text
+Node：22.19.0
+npm：10.9.3
+生产依赖：Vue 3.5.40
+开发依赖：Vite 8.1.5、@vitejs/plugin-vue 6.0.8、TypeScript 6.0.2
+检查与测试：vue-tsc 3.3.7、Vitest 4.1.10、Vue Test Utils 2.4.11、jsdom 29.1.1
+npm audit：0 vulnerabilities
+```
+
+检查时 Vue 3.5.40、Vite 8.1.5、Vue 插件 6.0.8 和 Vitest 4.1.10 均为 npm `latest` 稳定标签：
+
+- [npm：Vue](https://www.npmjs.com/package/vue)
+- [npm：Vite](https://www.npmjs.com/package/vite)
+- [npm：@vitejs/plugin-vue](https://www.npmjs.com/package/@vitejs/plugin-vue)
+- [npm：Vitest](https://www.npmjs.com/package/vitest)
+
+没有选用 Vue 3.6 RC。初次尝试 TypeScript 7.0.2 时，构建发现其新的 package exports 与 `vue-tsc 3.3.7` 不兼容，因此固定为 vue-tsc 支持且实际检查通过的 TypeScript 6.0.2。jsdom 30.0.1 要求 Node 22.22.2，而当前为 22.19.0，因此固定为引擎范围兼容的 29.1.1。这里优先保证整个工具链被官方版本约束接受并真实可运行，而不是只追求每个包单独的最大版本号。
+
+### 测试与构建验证
+
+- `vue-tsc --noEmit` 严格类型检查通过。
+- Vitest 共 4 个测试文件、13 个测试全部通过。
+- Vite 生产构建通过，共转换 23 个模块。
+- 构建产物：HTML 0.62 kB，CSS 16.97 kB，JavaScript 77.02 kB；gzip 后分别为 0.44 kB、4.53 kB、30.42 kB。
+- `npm audit --audit-level=high` 返回 0 个已知漏洞。
+- 后端回归测试 173 个通过，3 个真实 Docker 测试按开关跳过；`pip check` 仍为 `No broken requirements found`。
+- `frontend/dist`、`frontend/node_modules` 和本地前端 `.env` 均由 Git 忽略，提交中只包含源码、配置和锁文件。
+- 按网站构建验证规则，本步完成代码、类型、单元测试和生产构建；用户未要求浏览器视觉验收，因此没有自动打开浏览器或执行截图点击测试。
+
+### 当前边界
+
+- 页面刷新后任务列表会清空，因为第 11 步后端状态和本步前端列表都尚未持久化。
+- 浏览器只能停止轮询，不能取消已经提交到后端的导入工作流；后续需要单独设计取消协议。
+- 客户端文件校验用于快速反馈，真正安全边界仍是后端；浏览器的 MIME、文件名和大小都不能替代服务器校验。
+- 上传请求目前没有字节级进度事件，任务卡在收到 HTTP 202 前显示固定的 4%；若后续需要大文件实时上传百分比，可改用 XMLHttpRequest 或支持上传进度的客户端。
+- 当前只有文档导入页面，知识问答导航仍是禁用提示。
+
+### 下一步
+
+第 13 步将进入课程的查询链路：建立问答请求状态和 LangGraph 骨架，接入商品名确认、查询向量生成与 Milvus 混合召回，为之后的 Vue 知识问答页面准备后端 API。
+
+### 一句话总结
+
+第 12 步用经过类型、测试和生产构建验证的 Vue 3 工作台替换了课程静态导入页，让多文件上传、节点轮询、结果展示和错误恢复形成了完整前端闭环。
