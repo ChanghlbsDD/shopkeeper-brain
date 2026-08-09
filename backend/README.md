@@ -69,7 +69,7 @@ MINERU_TASK_TIMEOUT_SECONDS=1800
 
 ## 文档导入工作流
 
-入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段；向量化节点会调用百炼云端 API 生成稠密和稀疏向量。Milvus 写入节点目前仍只记录执行顺序，将在下一步替换为真实业务。
+入口节点会真实检查文件是否存在、识别扩展名并选择分支；PDF 分支会调用 MinerU 云端 API 并写入下载后的 Markdown 路径；图片节点会把 Markdown 实际引用的本地图片上传至 MinIO，并把本地路径替换为对象地址；切分节点会根据 Markdown 标题层级生成知识片段；商品名节点会调用通义千问识别核心商品或设备名称并回填所有片段；向量化节点会调用百炼云端 API 生成稠密和稀疏向量；最后由 Milvus 节点创建或校验集合及索引，批量写入知识片段并回填自动主键。当前七个导入节点均已实现真实业务。
 
 工作流暂未暴露为 HTTP API，可在 Python 中直接验证：
 
@@ -157,6 +157,26 @@ EMBEDDING_BACKUP_ENABLED=true
 默认会在 Markdown 旁生成 `*_vectors.json` 供开发检查，该文件和本地 Python 运行时目录均已被 Git 忽略。API Key 缺失、HTTP 失败、数量不一致、1024 维校验失败或稀疏向量缺失都会终止节点，防止不完整向量进入 Milvus。
 
 同一份知识库在入库和查询时必须使用相同模型及维度；后续查询节点会用 `query` 类型生成查询向量。向量化会把商品名称和全部切片正文发送给阿里云百炼，处理敏感文档前需要确认数据合规要求。接口限制和可选维度以[百炼同步向量接口文档](https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api)为准。
+
+## Milvus 混合向量入库
+
+入库节点使用以下配置：
+
+```dotenv
+CHUNKS_COLLECTION=knowledge_chunks
+MILVUS_METRIC_TYPE=COSINE
+MILVUS_INSERT_BATCH_SIZE=100
+MILVUS_REQUEST_TIMEOUT_SECONDS=10
+MILVUS_BACKUP_ENABLED=true
+```
+
+首次运行会创建显式 schema：`chunk_id` 是 Milvus 自动生成的 INT64 主键，`dense_vector` 是固定维度稠密向量，`sparse_vector` 是稀疏向量；正文、标题、父标题、文件标题和商品名称使用 VARCHAR，分片序号 `part` 是可空整数。稠密向量建立 `AUTOINDEX + COSINE` 索引，稀疏向量建立 `SPARSE_INVERTED_INDEX + IP` 索引。
+
+集合已存在时不会盲目重建，而会先检查自动主键、字段类型、稠密维度和索引配置。任一 chunk 缺少正文、商品名或两种向量，向量含非有限数值、各片段维度不一致，或已有集合结构不兼容时，导入会明确失败，不会跳过错误数据继续写入。
+
+数据按 `MILVUS_INSERT_BATCH_SIZE` 分批写入；后续批次失败时会尽力删除本次已经成功写入的前置批次。成功后，Milvus 返回的主键会同时写入每个 chunk 的 `chunk_id` 和状态的 `milvus_ids`。默认还会生成 Git 已忽略的 `*_milvus_chunks.json` 调试备份。
+
+重复运行同一文档会生成新的记录，当前尚未实现按文件去重或覆盖。集合 schema 与索引的设计分别参考 [Milvus Schema](https://milvus.io/docs/v2.6.x/schema.md) 和 [稀疏向量索引](https://milvus.io/docs/v2.6.x/sparse-inverted-index.md)。
 
 ## 目录职责
 

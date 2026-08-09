@@ -12,10 +12,10 @@ from app.workflows.importing.nodes import (
     BgeEmbeddingNode,
     DocumentSplitNode,
     EntryNode,
+    ImportMilvusNode,
     ItemNameRecognitionNode,
     MarkdownImageNode,
     PdfToMarkdownNode,
-    PendingNode,
 )
 from app.workflows.importing.state import ImportGraphState, create_import_state
 
@@ -45,6 +45,7 @@ def create_import_workflow(
     document_split_node: BaseNode | None = None,
     item_name_node: BaseNode | None = None,
     embedding_node: BaseNode | None = None,
+    milvus_node: BaseNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译文档导入流程骨架。"""
 
@@ -55,10 +56,7 @@ def create_import_workflow(
     graph.add_node(DOCUMENT_SPLIT_NODE, document_split_node or DocumentSplitNode())
     graph.add_node(ITEM_NAME_NODE, item_name_node or ItemNameRecognitionNode())
     graph.add_node(EMBEDDING_NODE, embedding_node or BgeEmbeddingNode())
-    graph.add_node(
-        MILVUS_NODE,
-        PendingNode(MILVUS_NODE, "后续将文档片段和向量写入 Milvus"),
-    )
+    graph.add_node(MILVUS_NODE, milvus_node or ImportMilvusNode())
 
     graph.add_edge(START, ENTRY_NODE)
     graph.add_conditional_edges(

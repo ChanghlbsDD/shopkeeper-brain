@@ -49,3 +49,7 @@ class ItemNameRecognitionError(ImportWorkflowError):
 
 class EmbeddingError(ImportWorkflowError):
     """百炼无法为文档片段生成有效混合向量。"""
+
+
+class MilvusImportError(ImportWorkflowError):
+    """Milvus 集合或知识片段写入失败。"""

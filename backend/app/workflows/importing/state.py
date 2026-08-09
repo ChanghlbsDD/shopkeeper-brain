@@ -17,6 +17,7 @@ class DocumentChunk(TypedDict, total=False):
     item_name: str
     dense_vector: list[float]
     sparse_vector: dict[int, float]
+    chunk_id: int
 
 
 class ImportGraphState(TypedDict, total=False):
@@ -40,7 +41,9 @@ class ImportGraphState(TypedDict, total=False):
     item_name_chunks_path: str
     embeddings: list[list[float]]
     embedding_chunks_path: str
-    milvus_ids: list[str]
+    milvus_ids: list[int]
+    milvus_collection_name: str
+    milvus_chunks_path: str
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
@@ -64,6 +67,8 @@ DEFAULT_IMPORT_STATE: ImportGraphState = {
     "embeddings": [],
     "embedding_chunks_path": "",
     "milvus_ids": [],
+    "milvus_collection_name": "",
+    "milvus_chunks_path": "",
     "completed_nodes": [],
     "node_durations_ms": {},
 }

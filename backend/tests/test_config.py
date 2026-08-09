@@ -90,3 +90,16 @@ def test_cloud_embedding_defaults_and_limits() -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, embedding_dimension=1000)
+
+
+def test_milvus_import_defaults_and_limits() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.chunks_collection == "knowledge_chunks"
+    assert settings.milvus_metric_type == "COSINE"
+    assert settings.milvus_insert_batch_size == 100
+    assert settings.milvus_request_timeout_seconds == 10
+    assert settings.milvus_backup_enabled is True
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, milvus_insert_batch_size=1001)

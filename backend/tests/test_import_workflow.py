@@ -9,6 +9,7 @@ from app.workflows.importing.graph import (
 )
 from app.workflows.importing.nodes import (
     BgeEmbeddingNode,
+    ImportMilvusNode,
     ItemNameRecognitionNode,
     PdfToMarkdownNode,
 )
@@ -30,6 +31,15 @@ def successful_embedder(texts: list[str]) -> list[TextEmbedding]:
     return [TextEmbedding(dense_vector=[0.1, 0.2], sparse_vector={1: 0.5}) for _ in texts]
 
 
+def successful_milvus_importer(
+    entities: list[dict[str, object]],
+    _dimension: int,
+    _collection_name: str,
+    _batch_size: int,
+) -> list[int]:
+    return list(range(100, 100 + len(entities)))
+
+
 def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     source = tmp_path / "manual.pdf"
     source.write_bytes(b"%PDF test fixture")
@@ -42,6 +52,10 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
         ),
         embedding_node=BgeEmbeddingNode(
             embedder=successful_embedder,
+            backup_enabled=False,
+        ),
+        milvus_node=ImportMilvusNode(
+            importer=successful_milvus_importer,
             backup_enabled=False,
         ),
     )
@@ -61,6 +75,7 @@ def test_pdf_workflow_visits_all_nodes(tmp_path: Path) -> None:
     assert result["chunks"][0]["content"] == "# Converted"
     assert result["item_name"] == "测试设备"
     assert result["chunks"][0]["dense_vector"] == [0.1, 0.2]
+    assert result["chunks"][0]["chunk_id"] == 100
 
 
 def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
@@ -74,6 +89,10 @@ def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
         ),
         embedding_node=BgeEmbeddingNode(
             embedder=successful_embedder,
+            backup_enabled=False,
+        ),
+        milvus_node=ImportMilvusNode(
+            importer=successful_milvus_importer,
             backup_enabled=False,
         ),
     )
@@ -90,6 +109,7 @@ def test_markdown_workflow_skips_pdf_conversion(tmp_path: Path) -> None:
     assert "pdf_to_md_node" not in result["node_durations_ms"]
     assert result["chunks"][0]["content"] == "# Manual"
     assert result["item_name"] == "测试设备"
+    assert result["milvus_ids"] == [100]
 
 
 def test_router_rejects_state_without_file_type() -> None:

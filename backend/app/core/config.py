@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     minio_secure: bool = False
 
     milvus_url: str = "http://localhost:19530"
+    chunks_collection: str = Field(
+        default="knowledge_chunks",
+        min_length=1,
+        max_length=255,
+    )
+    milvus_metric_type: Literal["COSINE"] = "COSINE"
+    milvus_insert_batch_size: int = Field(default=100, ge=1, le=1000)
+    milvus_request_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    milvus_backup_enabled: bool = True
 
     mongo_url: str = (
         "mongodb://shopkeeper:shopkeeper-mongo-change-me@localhost:27017/?authSource=admin"

@@ -1584,3 +1584,192 @@ pip check：No broken requirements found
 ### 一句话总结
 
 第 9 步用百炼 `text-embedding-v4` API 取代本地 BGE-M3，为每个知识片段生成可供 Milvus 混合检索的 1024 维稠密向量和关键词稀疏向量。
+
+## 第 10 步：Milvus 混合向量入库
+
+日期：2026-08-09
+
+### 本步目标
+
+把导入流程最后一个 `import_milvus_node` 从占位节点替换为真实业务节点：创建或校验知识片段集合，为稠密向量和稀疏向量建立索引，批量写入上一步生成的 chunks，并把 Milvus 自动生成的主键回填到工作流状态。
+
+本步完成后，PDF 与 Markdown 两条导入分支从入口、解析、图片处理、切分、商品名识别、向量化到 Milvus 入库的七个节点都已具备真实实现，不再保留只记录执行顺序的占位节点。
+
+### 与上一步的目录区别
+
+上一步结束时，`import_milvus_node` 仍由通用 `PendingNode` 代替，向量只保存在内存状态和调试 JSON 中。本步新增后的相关目录为：
+
+```text
+backend/
+├── app/
+│   ├── clients/
+│   │   └── milvus_storage.py                    # 新增
+│   └── workflows/importing/nodes/
+│       └── import_milvus.py                     # 新增
+└── tests/
+    ├── integration/
+    │   └── test_milvus_import.py                # 新增
+    ├── test_import_milvus_node.py               # 新增
+    └── test_milvus_storage.py                   # 新增
+```
+
+同时修改或删除以下已有文件：
+
+```text
+.
+├── .env.example
+├── backend/
+│   ├── app/core/config.py
+│   ├── app/workflows/importing/exceptions.py
+│   ├── app/workflows/importing/graph.py
+│   ├── app/workflows/importing/nodes/__init__.py
+│   ├── app/workflows/importing/nodes/pending.py  # 删除
+│   ├── app/workflows/importing/state.py
+│   ├── tests/test_config.py
+│   ├── tests/test_import_workflow.py
+│   └── README.md
+└── docs/development-log.md
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/milvus_storage.py` | 封装集合 schema、稠密与稀疏索引、已有集合兼容性检查、分批写入、返回主键校验和失败后的尽力回滚。 |
+| `backend/app/workflows/importing/nodes/import_milvus.py` | 校验工作流 chunks、标量字段和两种向量，组装明确的 Milvus 实体，调用存储层入库，把自动主键回填到 chunks，并按配置生成调试备份。 |
+| `backend/tests/test_milvus_storage.py` | 用内存模拟客户端验证建表、索引、已有集合兼容性、分批写入、主键校验、刷新和后续批次失败回滚。 |
+| `backend/tests/test_import_milvus_node.py` | 验证节点的实体组装、ID 回填、原状态不被修改、备份开关、集合名、批次、字段、维度、稀疏向量及异常包装。 |
+| `backend/tests/integration/test_milvus_import.py` | 连接 Docker 中的真实 Milvus，创建唯一临时集合，写入两条混合向量数据，读取核对字段与索引，并在结束时删除临时集合。 |
+
+### 已有文件的改动
+
+| 文件 | 本次改动 |
+| --- | --- |
+| `.env.example` | 增加 Milvus 单批写入数量、请求超时和入库结果备份开关。 |
+| `backend/app/core/config.py` | 加载集合名、稠密度量、批次大小、请求超时和备份配置，并限制合法范围。 |
+| `backend/app/workflows/importing/exceptions.py` | 新增 `MilvusImportError`，在工作流节点边界表达集合或写入失败。 |
+| `backend/app/workflows/importing/graph.py` | 用真实 `ImportMilvusNode` 替换最后一个占位节点，并提供测试注入入口。 |
+| `backend/app/workflows/importing/nodes/__init__.py` | 导出 Milvus 入库节点，不再导出通用占位节点。 |
+| `backend/app/workflows/importing/nodes/pending.py` | 删除；七个导入节点均已完成真实实现，项目中已没有调用方。 |
+| `backend/app/workflows/importing/state.py` | 给 chunk 增加整数 `chunk_id`，把 `milvus_ids` 明确为整数列表，并增加集合名和备份路径状态。 |
+| `backend/tests/test_config.py` | 验证 Milvus 新配置的默认值及边界限制。 |
+| `backend/tests/test_import_workflow.py` | 在 PDF、Markdown 完整流程中注入内存入库器，确认最后节点执行并回填主键。 |
+| `backend/README.md` | 宣布七节点导入链路已经完整实现，并说明 Milvus 配置、schema、索引、校验、回滚与重复导入边界。 |
+| `docs/development-log.md` | 记录第 10 步的目录差异、文件职责、实现方案和真实验证结果。 |
+
+### 节点执行流程
+
+```text
+读取已含 item_name、dense_vector、sparse_vector 的 chunks
+  ↓
+逐项校验文本、UTF-8 长度、向量数值、稠密维度和可选 part
+  ↓
+连接 MILVUS_URL 指向的 Milvus
+  ↓
+集合不存在：创建显式 schema 和两套索引
+集合已存在：校验字段、维度、自动主键和索引兼容性
+  ↓
+按 MILVUS_INSERT_BATCH_SIZE 分批写入
+  ↓
+校验每批 insert_count 和自动生成的 INT64 主键
+  ↓
+flush 集合，把 chunk_id 和 milvus_ids 回填到状态
+  ↓
+按配置生成 *_milvus_chunks.json 调试备份
+```
+
+### 集合字段和索引
+
+| 字段 | Milvus 类型 | 作用 |
+| --- | --- | --- |
+| `chunk_id` | INT64，主键，auto_id | 由 Milvus 自动生成的知识片段唯一 ID。 |
+| `dense_vector` | FLOAT_VECTOR | 保存百炼生成的固定维度语义向量。 |
+| `sparse_vector` | SPARSE_FLOAT_VECTOR | 保存关键词索引及对应权重。 |
+| `content` | VARCHAR | 知识片段正文。 |
+| `title` | VARCHAR | 当前 Markdown 标题。 |
+| `parent_title` | VARCHAR | 上级标题，可为空字符串。 |
+| `file_title` | VARCHAR | 来源文档标题。 |
+| `item_name` | VARCHAR | 上一步识别并回填的商品或设备名称。 |
+| `part` | nullable INT64 | 超长章节被拆分后的可选序号。 |
+
+稠密字段使用 `AUTOINDEX + COSINE`，稀疏字段使用 `SPARSE_INVERTED_INDEX + IP + DAAT_MAXSCORE`。集合关闭动态字段，避免拼写错误的字段静默进入数据库；已有集合必须通过结构和维度校验才允许继续写入。
+
+设计依据：
+
+- [Milvus：Schema Explained](https://milvus.io/docs/v2.6.x/schema.md)
+- [Milvus：Sparse Vector](https://milvus.io/docs/v2.6.x/sparse_vector.md)
+- [Milvus：Sparse Inverted Index](https://milvus.io/docs/v2.6.x/sparse-inverted-index.md)
+- [PyMilvus：Insert](https://milvus.io/api-reference/pymilvus/v2.6.x/MilvusClient/Vector/insert.md)
+
+### 数据校验与失败边界
+
+- 不跳过坏 chunk：正文、文件标题、商品名称或任一向量缺失时，整次入库在写数据库前失败。
+- 所有稠密向量必须至少包含两个有限数值并具有相同维度；稀疏向量索引必须是非负整数，权重必须是有限数值。
+- 文本按 UTF-8 字节数检查 Milvus VARCHAR 上限，避免中文字符数和实际存储字节数不一致。
+- 已有集合维度与当前向量不一致时明确报错，防止修改模型或维度后把不同向量空间混在同一集合。
+- 每批响应都必须包含正确的 `insert_count` 和等量 INT64 主键；响应不完整不会被当作成功。
+- 如果第二批或后续批次失败，会尽力删除本次已成功写入的前置批次并 flush；如果进程或数据库突然中断，仍不能把这种补偿机制视为跨系统事务。
+
+### 配置与输出
+
+公开配置模板为：
+
+```dotenv
+CHUNKS_COLLECTION=knowledge_chunks
+MILVUS_METRIC_TYPE=COSINE
+MILVUS_INSERT_BATCH_SIZE=100
+MILVUS_REQUEST_TIMEOUT_SECONDS=10
+MILVUS_BACKUP_ENABLED=true
+```
+
+入库成功后，状态新增或更新：
+
+```json
+{
+  "chunks": [{"chunk_id": 123456789}],
+  "milvus_ids": [123456789],
+  "milvus_collection_name": "knowledge_chunks",
+  "milvus_chunks_path": "D:\\docs\\manual_milvus_chunks.json"
+}
+```
+
+真实 chunk 仍保留上游生成的其他字段。调试备份已经由现有 `*_chunks.json` 忽略规则排除在 Git 之外；生产环境不需要本地备份时可设置 `MILVUS_BACKUP_ENABLED=false`。
+
+### Python 与虚拟环境
+
+本步继续使用项目内已经恢复稳定的 Python 3.10 环境：
+
+```text
+项目解释器：D:\code\xm\掌柜智库\backend\.venv\Scripts\python.exe
+Python：3.10.11
+新增 Python 包：0
+pip check：No broken requirements found
+```
+
+PyMilvus 继续使用项目已经固定的 2.6.17，没有重复下载 Python、创建额外虚拟环境或安装本地 AI 模型。
+
+### 测试与真实 Milvus 验证
+
+- Ruff 格式检查通过，共检查 57 个 Python 文件。
+- Ruff 代码检查通过。
+- pytest 共收集 145 个测试：默认模式 143 个通过，2 个 Docker 集成测试按开关跳过。
+- 总覆盖率为 88%；`milvus_storage.py` 为 84%，`import_milvus.py` 为 85%。
+- `pip check` 返回 `No broken requirements found`。
+- 显式设置 `RUN_INTEGRATION_TESTS=1` 后，五个基础设施健康检查和真实 Milvus 入库测试共 2 个全部通过。
+- 真实入库测试创建唯一临时集合，验证两种索引、两批写入、主键回填和字段读取，结束后已删除集合，没有保留测试数据。
+- 本步没有调用 MinerU、通义千问或百炼，不消耗任何 AI API 额度；真实 Milvus 测试使用的是合成文本和测试向量。
+
+### 当前边界
+
+- 重复导入同一文档会产生新的 chunk 记录，尚未实现文档级去重、覆盖或版本管理。
+- 批次失败使用补偿删除而不是数据库事务；进程被强制终止时可能需要按任务 ID 清理，但当前 schema 还没有保存任务 ID。
+- 集合一旦创建，修改 `EMBEDDING_DIMENSION` 或切换不兼容的向量模型必须使用新集合或重建旧集合。
+- 导入工作流目前仍只能在 Python 中调用，尚未提供文档上传和任务状态 HTTP API。
+
+### 下一步
+
+第 11 步将把已经完整可运行的文档导入工作流封装为后端服务和 HTTP API，支持上传 PDF 或 Markdown、返回导入结果，并为后续 Vue 管理页面提供调用入口。
+
+### 一句话总结
+
+第 10 步把向量化后的知识片段可靠地批量写入了带稠密与稀疏索引的 Milvus，并把数据库自动主键回填到完整导入工作流。
