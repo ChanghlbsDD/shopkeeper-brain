@@ -55,6 +55,8 @@ class Settings(BaseSettings):
         "mongodb://shopkeeper:shopkeeper-mongo-change-me@localhost:27017/?authSource=admin"
     )
     mongo_db_name: str = "shopkeeper_brain"
+    mongo_request_timeout_seconds: float = Field(default=5, gt=0, le=60)
+    mongo_chat_collection: str = Field(default="chat_messages", min_length=1, max_length=120)
 
     mineru_api_token: str = ""
     mineru_base_url: str = "https://mineru.net/api/v4"
@@ -87,10 +89,16 @@ class Settings(BaseSettings):
     query_search_limit: int = Field(default=5, ge=1, le=20)
     query_dense_weight: float = Field(default=0.6, ge=0, le=1)
     query_sparse_weight: float = Field(default=0.4, ge=0, le=1)
-    query_history_max_messages: int = Field(default=10, ge=0, le=10)
+    query_history_max_messages: int = Field(default=10, ge=1, le=10)
     query_history_context_max_length: int = Field(default=4000, ge=100, le=50_000)
     query_item_name_max_count: int = Field(default=5, ge=1, le=20)
     query_item_name_max_output_tokens: int = Field(default=256, ge=32, le=2048)
+    query_item_name_candidate_limit: int = Field(default=5, ge=1, le=20)
+    query_item_name_high_confidence: float = Field(default=0.7, ge=0, le=1)
+    query_item_name_mid_confidence: float = Field(default=0.6, ge=0, le=1)
+    query_item_name_score_gap: float = Field(default=0.15, ge=0, le=1)
+    query_item_name_dense_weight: float = Field(default=0.5, ge=0, le=1)
+    query_item_name_sparse_weight: float = Field(default=0.5, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
@@ -98,6 +106,10 @@ class Settings(BaseSettings):
             raise ValueError("DOCUMENT_CHUNK_MAX_LENGTH 必须大于 DOCUMENT_CHUNK_MIN_LENGTH")
         if self.query_dense_weight + self.query_sparse_weight <= 0:
             raise ValueError("查询稠密和稀疏向量权重不能同时为 0")
+        if self.query_item_name_mid_confidence > self.query_item_name_high_confidence:
+            raise ValueError("商品名中置信阈值不能高于高置信阈值")
+        if self.query_item_name_dense_weight + self.query_item_name_sparse_weight <= 0:
+            raise ValueError("商品名稠密和稀疏向量权重不能同时为 0")
         return self
 
     @property

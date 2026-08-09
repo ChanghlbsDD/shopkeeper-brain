@@ -117,7 +117,7 @@ IMPORT_SOURCE_ARCHIVE_ENABLED=true
 
 ## 知识召回 HTTP API
 
-当前查询流程按顺序执行三个节点：通义千问根据问题和最近历史消息确认商品名并改写问题，百炼以 `query` 类型生成稠密与稀疏向量，Milvus 使用 `WeightedRanker` 融合两路召回结果。此阶段只返回检索片段，尚不生成最终答案。
+当前查询流程先由通义千问根据问题和最近历史消息提取商品名并改写问题，再用百炼和 Milvus 把提取名称与知识库标准名称对齐。名称明确时继续生成查询向量和召回片段；名称接近多个商品时直接返回候选项；没有可信候选时提示用户补充型号。此阶段只返回检索片段或澄清提示，尚不生成最终答案。
 
 | 方法 | 地址 | 作用 |
 | --- | --- | --- |
@@ -127,6 +127,7 @@ PowerShell 示例：
 
 ```powershell
 $body = @{
+  session_id = 'demo-session-1'
   query = '它怎么测量直流电压？'
   history = @(
     @{ role = 'assistant'; content = '这是 RS-12 数字万用表。' }
@@ -151,11 +152,34 @@ QUERY_HISTORY_MAX_MESSAGES=10
 QUERY_HISTORY_CONTEXT_MAX_LENGTH=4000
 QUERY_ITEM_NAME_MAX_COUNT=5
 QUERY_ITEM_NAME_MAX_OUTPUT_TOKENS=256
+QUERY_ITEM_NAME_CANDIDATE_LIMIT=5
+QUERY_ITEM_NAME_HIGH_CONFIDENCE=0.7
+QUERY_ITEM_NAME_MID_CONFIDENCE=0.6
+QUERY_ITEM_NAME_SCORE_GAP=0.15
+QUERY_ITEM_NAME_DENSE_WEIGHT=0.5
+QUERY_ITEM_NAME_SPARSE_WEIGHT=0.5
 ```
 
-识别到商品名称时，Milvus 使用参数化表达式 `item_name in {item_names}` 限制召回范围，避免直接拼接用户内容；没有识别到商品名时则在全部知识片段中检索。API 最多接收 10 条历史消息、每条 2000 字符，结果数量限制为 1～20。响应会返回原问题、改写问题、商品名、片段正文与来源标题、融合分数和节点耗时，但不会返回查询向量、Token 或异常堆栈。
+候选对齐复用 `knowledge_chunks` 的现有向量，并通过 `group_by_field=item_name` 保证不同商品都能进入候选，不再维护重复的商品名集合。精确名称直接确认；唯一高置信候选直接确认；多个高置信候选只有头部分差达到阈值才自动确认，否则进入 `needs_clarification`；只有中置信候选时同样要求用户选择。阈值是当前开发初值，生产数据准备好后需要用真实问题集评估。
+
+名称确认后，知识片段检索使用参数化表达式 `item_name in {item_names}` 限制范围，避免直接拼接用户内容。API 最多接收 10 条客户端启动历史、每条 2000 字符，结果数量限制为 1～20。响应新增 `session_id`、`status`、`item_name_options`、`clarification` 和 `history_persisted`；仍不会返回查询向量、Token 或异常堆栈。
 
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
+
+## MongoDB 会话历史
+
+请求可以携带 1～64 位字母、数字、下划线或连字符组成的 `session_id`；省略时由后端生成并随响应返回。服务优先读取 MongoDB 中该会话最近 10 条消息；只有数据库中还没有记录时，才用请求中的 `history` 作为首次会话启动上下文。
+
+```dotenv
+MONGO_URL=mongodb://用户名:密码@localhost:27017/?authSource=admin
+MONGO_DB_NAME=shopkeeper_brain
+MONGO_REQUEST_TIMEOUT_SECONDS=5
+MONGO_CHAT_COLLECTION=chat_messages
+```
+
+每条记录使用后端生成的 `message_id`，保存 `session_id`、角色、正文、改写问题、确认商品名和 UTC 时间。集合会建立消息 ID 唯一索引，以及 `session_id + created_at` 复合索引。查询成功后保存用户消息；返回澄清或无法识别提示时，同时保存助手提示，让下一轮“RS-12”之类的简短回复能够结合上下文继续处理。
+
+已有会话读取失败时返回 `QUERY_HISTORY_UNAVAILABLE`，避免在缺失上下文时错误解析代词。新会话或携带显式启动历史的请求可以在 MongoDB 暂时不可用时降级查询，此时响应的 `history_persisted=false`，明确表示本轮没有持久化。
 
 ## Markdown 图片处理
 

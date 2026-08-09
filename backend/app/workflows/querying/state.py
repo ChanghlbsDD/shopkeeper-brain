@@ -21,7 +21,11 @@ class QueryGraphState(TypedDict, total=False):
     original_query: str
     history: list[QueryHistoryMessage]
     search_limit: int
+    query_status: Literal["pending", "confirmed", "needs_clarification", "unrecognized"]
+    extracted_item_names: list[str]
     item_names: list[str]
+    item_name_options: list[str]
+    clarification: str
     rewritten_query: str
     query_dense_vector: list[float]
     query_sparse_vector: dict[int, float]
@@ -34,7 +38,11 @@ DEFAULT_QUERY_STATE: QueryGraphState = {
     "original_query": "",
     "history": [],
     "search_limit": 5,
+    "query_status": "pending",
+    "extracted_item_names": [],
     "item_names": [],
+    "item_name_options": [],
+    "clarification": "",
     "rewritten_query": "",
     "query_dense_vector": [],
     "query_sparse_vector": {},

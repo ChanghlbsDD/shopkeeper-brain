@@ -34,6 +34,7 @@ def test_item_name_node_uses_recent_history_and_normalizes_result() -> None:
             query_history_context_max_length=500,
         ),
         extractor=extractor,
+        aligner=lambda _names: (["RS-12 数字万用表"], []),
     )
     state = create_query_state(
         "它怎么测直流电压？",
@@ -50,6 +51,7 @@ def test_item_name_node_uses_recent_history_and_normalizes_result() -> None:
     assert "较早消息" not in captured["history"]
     assert "RS-12 数字万用表" in captured["history"]
     assert result["item_names"] == ["RS-12 数字万用表"]
+    assert result["query_status"] == "confirmed"
     assert result["rewritten_query"] == "RS-12 数字万用表如何测量直流电压？"
     assert result["completed_nodes"] == ["item_name_confirm_node"]
 
@@ -66,6 +68,7 @@ def test_item_name_node_falls_back_to_original_query() -> None:
     result = node(create_query_state("万用表怎么测量电压？"))
 
     assert result["item_names"] == []
+    assert result["query_status"] == "unrecognized"
     assert result["rewritten_query"] == "万用表怎么测量电压？"
 
 

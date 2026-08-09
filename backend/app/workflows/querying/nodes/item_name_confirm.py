@@ -8,7 +8,12 @@ from typing import Any
 from app.clients.qwen_chat import QwenChatClient, QwenChatError
 from app.core.config import Settings, get_settings
 from app.workflows.querying.base import BaseQueryNode
-from app.workflows.querying.exceptions import ItemNameConfirmError, QueryValidationError
+from app.workflows.querying.exceptions import (
+    ItemNameConfirmError,
+    QueryValidationError,
+    QueryWorkflowError,
+)
+from app.workflows.querying.item_name_alignment import ItemNameAligner
 from app.workflows.querying.prompts import (
     ITEM_NAME_CONFIRM_SYSTEM_PROMPT,
     ITEM_NAME_CONFIRM_USER_PROMPT,
@@ -16,6 +21,7 @@ from app.workflows.querying.prompts import (
 from app.workflows.querying.state import QueryGraphState, QueryHistoryMessage
 
 ItemNameExtractor = Callable[[str, str], dict[str, Any]]
+ItemNameAlignment = Callable[[list[str]], tuple[list[str], list[str]]]
 
 
 class ItemNameConfirmNode(BaseQueryNode):
@@ -28,10 +34,12 @@ class ItemNameConfirmNode(BaseQueryNode):
         *,
         settings: Settings | None = None,
         extractor: ItemNameExtractor | None = None,
+        aligner: ItemNameAlignment | None = None,
     ) -> None:
         super().__init__()
         self.settings = settings or get_settings()
         self.extractor = extractor
+        self.aligner = aligner
 
     def process(self, state: QueryGraphState) -> Mapping[str, object]:
         original_query = state.get("original_query")
@@ -58,7 +66,56 @@ class ItemNameConfirmNode(BaseQueryNode):
                 cause=exc,
             ) from exc
 
-        return self._normalize_result(raw_result, fallback_query=query)
+        normalized = self._normalize_result(raw_result, fallback_query=query)
+        extracted_names = normalized["extracted_item_names"]
+        rewritten_query = normalized["rewritten_query"]
+        if not isinstance(extracted_names, list) or not isinstance(rewritten_query, str):
+            raise ItemNameConfirmError("商品名称确认结果格式无效", node_name=self.name)
+        if not extracted_names:
+            return {
+                **normalized,
+                "query_status": "unrecognized",
+                "clarification": (
+                    "抱歉，我无法识别您询问的具体产品名称，请提供更准确的产品名称或型号。"
+                ),
+            }
+
+        try:
+            confirmed, options = (self.aligner or ItemNameAligner(self.settings).align)(
+                extracted_names
+            )
+        except QueryWorkflowError as exc:
+            if not exc.node_name:
+                exc.node_name = self.name
+            raise
+        except Exception as exc:
+            raise ItemNameConfirmError(
+                "商品名称候选对齐失败",
+                node_name=self.name,
+                cause=exc,
+            ) from exc
+
+        if options:
+            return {
+                **normalized,
+                "query_status": "needs_clarification",
+                "item_names": confirmed,
+                "item_name_options": options,
+                "clarification": (
+                    f"我不确定您指的是哪款产品。您是在询问以下产品吗：{'、'.join(options)}？"
+                ),
+            }
+        if confirmed:
+            return {
+                **normalized,
+                "query_status": "confirmed",
+                "item_names": confirmed,
+            }
+        return {
+            **normalized,
+            "query_status": "unrecognized",
+            "clarification": "抱歉，知识库中没有匹配的产品，请提供更准确的产品名称或型号。",
+        }
 
     def _extract_with_qwen(self, query: str, history_text: str) -> dict[str, Any]:
         client = QwenChatClient(
@@ -135,6 +192,6 @@ class ItemNameConfirmNode(BaseQueryNode):
         if len(rewritten_query) > 2000:
             raise ItemNameConfirmError("改写后的问题长度超过限制", node_name=self.name)
         return {
-            "item_names": item_names,
+            "extracted_item_names": item_names,
             "rewritten_query": rewritten_query,
         }

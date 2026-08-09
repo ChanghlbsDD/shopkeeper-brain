@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Literal, cast
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -24,6 +24,19 @@ QUERY_EMBEDDING_NODE = "query_embedding_node"
 VECTOR_SEARCH_NODE = "vector_search_node"
 
 
+def route_after_item_name(
+    state: QueryGraphState,
+) -> Literal["search", "stop"]:
+    """商品名已确认才继续检索，否则直接返回澄清或无法识别提示。"""
+
+    status = state.get("query_status")
+    if status == "confirmed":
+        return "search"
+    if status in {"needs_clarification", "unrecognized"}:
+        return "stop"
+    raise ValueError("商品名称确认节点没有设置有效查询状态")
+
+
 def create_query_workflow(
     *,
     item_name_node: BaseQueryNode | None = None,
@@ -37,7 +50,11 @@ def create_query_workflow(
     graph.add_node(QUERY_EMBEDDING_NODE, embedding_node or QueryEmbeddingNode())
     graph.add_node(VECTOR_SEARCH_NODE, search_node or VectorSearchNode())
     graph.add_edge(START, ITEM_NAME_CONFIRM_NODE)
-    graph.add_edge(ITEM_NAME_CONFIRM_NODE, QUERY_EMBEDDING_NODE)
+    graph.add_conditional_edges(
+        ITEM_NAME_CONFIRM_NODE,
+        route_after_item_name,
+        {"search": QUERY_EMBEDDING_NODE, "stop": END},
+    )
     graph.add_edge(QUERY_EMBEDDING_NODE, VECTOR_SEARCH_NODE)
     graph.add_edge(VECTOR_SEARCH_NODE, END)
     return graph.compile()

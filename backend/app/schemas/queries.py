@@ -16,6 +16,15 @@ NonEmptyHistoryContent = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=2000),
 ]
+SessionId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    ),
+]
 
 
 class QueryHistoryMessageRequest(BaseModel):
@@ -33,6 +42,7 @@ class QuerySearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: NonEmptyQuery
+    session_id: SessionId | None = None
     history: list[QueryHistoryMessageRequest] = Field(default_factory=list, max_length=10)
     limit: int | None = Field(default=None, ge=1, le=20)
 
@@ -53,19 +63,44 @@ class QuerySearchHitResponse(BaseModel):
 class QuerySearchResponse(BaseModel):
     """商品名确认、问题改写和混合召回结果。"""
 
+    session_id: str
+    status: Literal["retrieved", "needs_clarification", "unrecognized"]
+    history_persisted: bool
     original_query: str
     rewritten_query: str
+    extracted_item_names: list[str]
     item_names: list[str]
+    item_name_options: list[str]
+    clarification: str
     matches: list[QuerySearchHitResponse]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
     @classmethod
-    def from_state(cls, state: QueryGraphState) -> QuerySearchResponse:
+    def from_state(
+        cls,
+        state: QueryGraphState,
+        *,
+        session_id: str,
+        history_persisted: bool,
+    ) -> QuerySearchResponse:
+        query_status = state.get("query_status")
+        if query_status == "confirmed":
+            response_status = "retrieved"
+        elif query_status in {"needs_clarification", "unrecognized"}:
+            response_status = query_status
+        else:
+            raise ValueError("查询工作流没有返回有效状态")
         return cls(
+            session_id=session_id,
+            status=response_status,
+            history_persisted=history_persisted,
             original_query=state.get("original_query", ""),
             rewritten_query=state.get("rewritten_query", ""),
+            extracted_item_names=list(state.get("extracted_item_names", [])),
             item_names=list(state.get("item_names", [])),
+            item_name_options=list(state.get("item_name_options", [])),
+            clarification=state.get("clarification", ""),
             matches=[
                 QuerySearchHitResponse.model_validate(hit)
                 for hit in state.get("search_results", [])

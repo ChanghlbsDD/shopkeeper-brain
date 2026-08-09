@@ -128,10 +128,32 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
     assert settings.query_sparse_weight == 0.4
     assert settings.query_history_max_messages == 10
     assert settings.query_item_name_max_count == 5
+    assert settings.query_item_name_candidate_limit == 5
+    assert settings.query_item_name_high_confidence == 0.7
+    assert settings.query_item_name_mid_confidence == 0.6
+    assert settings.query_item_name_score_gap == 0.15
+    assert settings.query_item_name_dense_weight == 0.5
+    assert settings.query_item_name_sparse_weight == 0.5
+    assert settings.mongo_chat_collection == "chat_messages"
+    assert settings.mongo_request_timeout_seconds == 5
 
     with pytest.raises(ValidationError, match="不能同时为 0"):
         Settings(
             _env_file=None,
             query_dense_weight=0,
             query_sparse_weight=0,
+        )
+
+    with pytest.raises(ValidationError, match="中置信阈值"):
+        Settings(
+            _env_file=None,
+            query_item_name_high_confidence=0.6,
+            query_item_name_mid_confidence=0.7,
+        )
+
+    with pytest.raises(ValidationError, match="商品名稠密和稀疏"):
+        Settings(
+            _env_file=None,
+            query_item_name_dense_weight=0,
+            query_item_name_sparse_weight=0,
         )

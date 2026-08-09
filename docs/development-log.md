@@ -2407,3 +2407,192 @@ Milvus 每次混合检索创建一个稠密请求和一个稀疏请求，再用�
 ### 一句话总结
 
 第 13 步打通了商品名提取、查询向量生成、Milvus 稠密稀疏混合召回和 FastAPI 数据契约，让项目第一次具备了从用户问题安全检索知识片段的后端能力。
+
+## 第 14 步：商品名称候选对齐与 MongoDB 会话历史
+
+日期：2026-08-10
+
+### 本步目标
+
+完成课程 day10 的商品名称确认后半段：把通义千问提取的口语名称与知识库中的标准商品名做向量匹配，根据置信区间和分数差决定“直接检索、请用户选择、无法识别”三条路径。同时让查询 API 用 MongoDB 保存会话，使下一轮简短回复能够自动获得上一轮澄清上下文。
+
+本步仍不生成最终回答；商品名确认后继续使用第 13 步的混合召回，名称不明确时则在商品名节点后提前结束，不浪费查询向量和知识片段检索调用。
+
+### 与上一步的目录区别
+
+第 13 步只有 LLM 商品名提取，没有标准名称对齐；历史完全由客户端随请求传入。本步新增目录如下：
+
+```text
+backend/
+├── app/
+│   ├── clients/
+│   │   ├── milvus_item_names.py
+│   │   └── mongo_history.py
+│   └── workflows/querying/
+│       └── item_name_alignment.py
+└── tests/
+    ├── integration/
+    │   └── test_mongo_history.py
+    ├── test_item_name_alignment.py
+    ├── test_milvus_item_names.py
+    └── test_mongo_history.py
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/milvus_item_names.py` | 使用商品名查询向量搜索现有知识片段，并按 `item_name` 分组返回不重复的标准名称候选。 |
+| `backend/app/clients/mongo_history.py` | 建立 MongoDB 消息索引，保存、读取和按会话删除标准化聊天消息。 |
+| `backend/app/workflows/querying/item_name_alignment.py` | 批量生成商品名查询向量，调用候选检索，并执行精确匹配、阈值分区和头部分差决策。 |
+| `backend/tests/integration/test_mongo_history.py` | 用随机会话 ID 验证真实 MongoDB 容器的写入、读取和最终清理。 |
+| `backend/tests/test_item_name_alignment.py` | 覆盖精确命中、唯一高置信、多高置信分差、中置信候选和低分丢弃。 |
+| `backend/tests/test_milvus_item_names.py` | 验证分组检索参数、候选去重、向量校验、空集合和异常响应。 |
+| `backend/tests/test_mongo_history.py` | 用内存假集合验证索引、消息元数据、最近消息顺序、会话隔离和非法数据拒绝。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `.env.example` | 增加 MongoDB 消息集合、超时和商品名对齐阈值；删除未使用的独立商品名集合与最低余弦分配置。 |
+| `backend/README.md` | 补充三路决策、会话 ID、响应状态、MongoDB 历史和降级规则。 |
+| `backend/app/core/config.py` | 增加候选数量、高中置信阈值、分数差、候选向量权重及 MongoDB 历史配置校验。 |
+| `backend/app/schemas/queries.py` | 请求新增可选 `session_id`；响应新增状态、候选、澄清信息和历史持久化标记。 |
+| `backend/app/services/query_service.py` | 查询前读取服务端历史，查询后保存用户消息和澄清消息，并区分新会话降级与已有会话读取失败。 |
+| `backend/app/workflows/querying/state.py` | 增加提取名称、确认状态、候选列表和澄清文本。 |
+| `backend/app/workflows/querying/nodes/item_name_confirm.py` | 在 LLM 提取后调用候选对齐器，并生成确认、澄清或无法识别状态。 |
+| `backend/app/workflows/querying/graph.py` | 在商品名节点后增加条件边，只有确认状态才进入查询向量和 Milvus 召回。 |
+| `backend/tests/test_config.py` | 增加阈值顺序、候选权重和 MongoDB 默认值测试。 |
+| `backend/tests/test_query_api.py` | 增加会话持久化、下一轮历史读取、澄清响应和 MongoDB 故障策略测试。 |
+| `backend/tests/test_query_nodes.py` | 为旧节点测试注入候选对齐器，并验证确认和无法识别状态。 |
+| `backend/tests/test_query_workflow.py` | 验证确认分支继续召回、澄清分支提前结束和非法路由状态。 |
+
+### 为什么不新建独立商品名向量集合
+
+课程示例使用 `ITEM_NAME_COLLECTION` 保存一份单独的商品名向量。本项目已经在 `knowledge_chunks` 的每条记录中保存了 `item_name` 和混合向量，如果再建一套集合，需要改变导入工作流、额外调用一次向量 API，并处理两套数据的一致性和删除问题。
+
+本步改为在现有知识片段集合上搜索，再使用 Milvus 的 `group_by_field="item_name"` 每个商品只保留一个代表结果。Milvus 官方将 Grouping Search 用于按标量字段聚合片段、增加结果多样性：[Milvus Grouping Search](https://milvus.io/docs/grouping-search.md)。
+
+这项取舍减少了服务器存储、导入调用和维护成本，适合当前 2 核 2 GiB 服务器。代价是候选分数同时受到片段正文影响，不是纯商品名称相似度；后续需要用真实问法数据集校准阈值，如果准确率不足，再升级为独立商品名称索引。
+
+### 商品名称对齐规则
+
+```text
+LLM 提取名称
+    ↓ 百炼 query 混合向量
+Milvus chunks 混合检索 + item_name 分组
+    ↓
+候选评分
+    ├─ 标准名精确命中              → confirmed
+    ├─ 只有一个分数 ≥ 0.70         → confirmed
+    ├─ 多个分数 ≥ 0.70
+    │   ├─ 第一名 - 第二名 ≥ 0.15 → confirmed 第一名
+    │   └─ 分数接近                → options
+    ├─ 0.60 ≤ 分数 < 0.70          → options
+    └─ 分数 < 0.60                 → 丢弃
+```
+
+当一个问题提到多个商品时，每个提取名称分别搜索和判断，不使用课程示例中的“所有已确认商品与全局最高分比较”方式。全局过滤可能错误删除用户明确询问的第二个商品；本项目只用头部分差解决同一个提取名称内部的歧义。
+
+如果任一名称仍有候选项，本轮返回 `needs_clarification` 并停止；候选全部确认后才进入查询向量和知识片段召回；没有可用候选则返回 `unrecognized`。
+
+### 查询图变化
+
+```text
+START
+  ↓
+item_name_confirm_node
+  ├─ confirmed ─────────────→ query_embedding_node
+  │                                  ↓
+  │                           vector_search_node → END
+  ├─ needs_clarification ─────────────────────────→ END
+  └─ unrecognized ─────────────────────────────────→ END
+```
+
+澄清和无法识别分支不会调用第二次查询向量 API，也不会执行知识片段搜索。
+
+### MongoDB 会话结构
+
+`chat_messages` 中每条记录包含：
+
+```json
+{
+  "message_id": "后端生成的随机 ID",
+  "session_id": "session-1",
+  "role": "user",
+  "content": "万用表怎么测电压？",
+  "rewritten_query": "万用表怎么测电压？",
+  "item_names": [],
+  "created_at": "UTC 时间"
+}
+```
+
+索引：
+
+- `message_id_unique`：保证消息 ID 唯一。
+- `session_recent_messages`：按 `session_id + created_at` 快速读取最近消息。
+
+查询成功后写入用户消息；如果本轮返回澄清或无法识别文本，同时写入助手消息。下一轮带同一个 `session_id` 时，MongoDB 历史优先于客户端 `history`；数据库尚无记录时，客户端历史只作为首次会话启动上下文。
+
+已有会话读取失败时返回 `QUERY_HISTORY_UNAVAILABLE`，避免缺少上下文却继续解释“它”“这个”等代词。新会话在 MongoDB 暂时不可用时仍可完成独立问题查询，但响应标记 `history_persisted=false`。
+
+### API 响应变化
+
+确认并召回：
+
+```json
+{
+  "session_id": "session-1",
+  "status": "retrieved",
+  "history_persisted": true,
+  "item_names": ["RS-12 数字万用表"],
+  "item_name_options": [],
+  "clarification": "",
+  "matches": []
+}
+```
+
+需要用户选择：
+
+```json
+{
+  "session_id": "session-1",
+  "status": "needs_clarification",
+  "history_persisted": true,
+  "item_names": [],
+  "item_name_options": [
+    "RS-12 数字万用表",
+    "RS-13 数字万用表"
+  ],
+  "clarification": "我不确定您指的是哪款产品……",
+  "matches": []
+}
+```
+
+响应示例省略了未变化字段。查询向量、MongoDB `_id`、连接串和异常堆栈仍不会返回。
+
+### 测试与验证
+
+- Ruff 静态检查和格式检查通过。
+- Pytest 共 220 个测试通过，5 个显式集成测试默认跳过。
+- `pip check` 返回 `No broken requirements found`。
+- 单元测试覆盖分组参数、候选去重、全部置信分支、LangGraph 条件边、消息索引、按时序读取、会话连续性和 MongoDB 故障降级。
+- 单独开启 `RUN_INTEGRATION_TESTS=1` 后，真实 MongoDB 写入、读取和精确会话清理测试通过；随机测试会话在 `finally` 中删除，没有残留。
+- 当前 `knowledge_chunks` 仍不存在，因此商品候选和完整查询真实集成测试继续跳过，需先导入文档。
+- 第一次执行旧单元测试时，因为没有给新增对齐依赖注入替身，意外发送了 2 次百炼向量请求；随后已修正测试隔离，单元测试不再访问真实 API。该次测试写入的 1 条 MongoDB 消息也已按精确会话 ID 删除。
+
+### 当前边界
+
+- 0.70、0.60 和 0.15 是课程开发初值，不是经过业务数据集验证的最终阈值。
+- 候选使用“商品名查询向量对知识片段向量”，正文会影响分数；真实数据量增长后需要评估独立商品名索引。
+- MongoDB 目前保存查询输入和澄清文本；最终回答要等答案生成节点完成后再写入。
+- 暂无清空会话历史的 HTTP API，只有客户端层的精确 `delete_session`，避免提前暴露删除操作。
+- 前端仍只有文档导入页面，尚未使用 `session_id`、候选按钮或澄清状态。
+
+### 下一步
+
+第 15 步将进入多路召回：保留当前直接向量检索，新增 HyDE 假设文档检索和可关闭的网页检索分支，在 LangGraph 中并行执行并为后续 RRF 融合准备统一结果格式。
+
+### 一句话总结
+
+第 14 步让查询链路能够把口语商品名对齐到知识库标准名称、在歧义时主动澄清，并通过 MongoDB 延续多轮会话上下文。
