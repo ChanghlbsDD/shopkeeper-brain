@@ -3175,3 +3175,121 @@ data: [DONE]
 ### 一句话总结
 
 第 18 步让精排证据真正变成带编号来源和图片的最终回答，并把完整问答写入 MongoDB 延续后续会话。
+
+## 第 19 步：SSE 查询接口、会话管理与 Vue 知识问答页
+
+日期：2026-08-10
+
+### 本步目标
+
+完成课程 day14 的项目收尾：把第 18 步已经具备的增量事件接成浏览器可消费的 SSE 接口，开放会话历史读取和清空接口，并将 Vue 前端扩展为文档导入与知识问答可切换的工作台。
+
+### 与上一步的目录区别
+
+```text
+frontend/src/
+├─ api/
+│  ├─ queries.ts
+│  └─ queries.spec.ts
+├─ components/
+│  └─ ChatWorkspace.vue
+└─ types/
+   └─ queries.ts
+```
+
+本步没有新增后端源文件；SSE 和历史接口加入已有的查询路由、服务和数据契约中。
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `frontend/src/types/queries.ts` | 描述查询请求、最终回答、引用、历史消息和四类 SSE 事件，统一组件与 API 客户端的 TypeScript 契约。 |
+| `frontend/src/api/queries.ts` | 封装同步查询、SSE 流式查询、历史读取和清空；处理跨网络数据块的 SSE 帧及统一安全错误。 |
+| `frontend/src/api/queries.spec.ts` | 验证拆包 SSE、流内错误、最终事件以及包含特殊字符的会话 ID 编码。 |
+| `frontend/src/components/ChatWorkspace.vue` | 提供完整问答界面，展示增量答案、节点状态、引用、图片、商品选项并管理会话恢复与清空。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `backend/app/api/routes/queries.py` | 新增 SSE 查询和历史 GET/DELETE 路由，在线程中运行同步工作流并发送保活注释。 |
+| `backend/app/schemas/queries.py` | 增加历史消息、历史列表和删除结果响应模型。 |
+| `backend/app/services/query_service.py` | 支持向工作流传入事件处理器，并增加会话读取、清空及 MongoDB 错误映射。 |
+| `backend/tests/test_query_api.py` | 增加进度/增量/final 事件、历史读取与单会话清空、参数校验和 OpenAPI 契约测试。 |
+| `frontend/src/App.vue` | 顶部导航改为可切换的“文档导入/知识问答”，挂载问答工作台。 |
+| `frontend/src/styles/main.css` | 增加桌面和移动端问答布局、消息、来源、图片、输入框及进行中状态样式。 |
+| `backend/README.md` | 记录同步、流式和历史接口的使用边界。 |
+| `frontend/README.md` | 记录问答页能力、SSE 实现和会话行为。 |
+| `README.md` | 将项目状态更新为完整 RAG 开发链路，并列出新增接口和页面能力。 |
+
+### 后端事件流
+
+```text
+Vue POST /api/queries/stream
+              ↓
+FastAPI 异步生成器
+              ↓ asyncio.to_thread
+QueryService → LangGraph → Qwen 流式回答
+    │              │             │
+    └─ progress ───┴─ delta ─────┤
+                                 ↓
+                         final（完整响应）
+                                 ↓
+                         保存 MongoDB 历史
+```
+
+事件类型：
+
+- `progress`：节点完成时返回节点名和耗时。
+- `delta`：答案模型生成的一段增量文本。
+- `final`：与同步接口相同的完整响应，包含会话 ID、答案、引用、图片和节点状态。
+- `error`：返回安全业务错误码、消息和对应 HTTP 状态信息，不泄露堆栈或上游响应正文。
+
+SSE HTTP 连接建立后不能再把业务失败改成另一个 HTTP 状态码，因此流内错误用 `error` 事件表示。15 秒没有事件时发送注释帧保持连接；响应关闭缓存，并在浏览器断开后停止等待。
+
+### 会话历史接口
+
+`GET /api/queries/history/{session_id}` 最多读取 50 条消息，从旧到新返回；`DELETE` 只删除路径中明确指定的一个会话。路径继续限制为 1～64 位字母、数字、下划线或连字符，避免把任意输入交给数据库查询。
+
+前端只在 `localStorage` 保存随机会话 ID，不保存 API Token。刷新页面会用该 ID 从 MongoDB 恢复历史；清空操作必须由用户确认，完成后创建新 ID，其他会话不受影响。
+
+### Vue 问答交互
+
+- 默认使用真实 SSE 增量回答，也可关闭开关切换到同步请求。
+- 回答区显示当前运行阶段；完成后展示后端结构化的来源与图片。
+- 商品名不明确时，把 `item_name_options` 渲染成可直接继续提问的按钮。
+- 页面只以普通文本显示模型答案，不把模型输出作为 HTML 执行。
+- 网络、API 和流中断都转成面向用户的中文提示，已接收的部分回答不会消失。
+- 桌面端采用流程侧栏和聊天主区，窄屏隐藏流程侧栏并把消息改为单列。
+
+### 测试与验证
+
+- Ruff 格式和静态检查通过。
+- 后端 Pytest 共 251 个测试通过，5 个显式集成测试默认跳过。
+- 前端 Vitest 共 16 个测试通过，`vue-tsc --noEmit` 和 Vite 生产构建通过。
+- 流式测试覆盖 JSON 横跨多个网络数据块，而不是只测试理想的一帧一块。
+- 测试全部使用内存存储、假工作流或浏览器响应流，没有调用真实通义千问、MinerU 或 Reranker API。
+
+### 当前运行边界
+
+- 实际问答前需要启动 Docker 基础设施、FastAPI 和 Vue，并先导入至少一份真实文档。
+- 外部 AI 调用会消耗账户额度；网页搜索默认关闭，只有显式配置后才使用。
+- 当前开发阶段前后端仍在本机分别运行，Docker 只运行 Milvus、MinIO、MongoDB、etcd 和 Attu；应用镜像与反向代理属于生产部署工作，不影响本地完整功能。
+- 2 核 2 GiB 服务器应继续使用 MinerU、Embedding 和 Reranker API，不能把已删除的本地模型重新放入部署包。
+
+### 项目还原结果
+
+至此，课程笔记中的主流程已经全部还原：
+
+```text
+PDF / Markdown
+  → 解析 → 图片托管 → 切分 → 商品识别 → 云端混合向量 → Milvus
+  → 商品确认 → 三路召回 → RRF → 云端 Reranker → 引用回答
+  → SSE 展示 + MongoDB 会话历史
+```
+
+前端使用 Vue 3 替代原静态页面；MinerU、Embedding 与 Reranker 使用 API，适配现有低内存服务器。后续新增功能将属于项目迭代，而不再是课程主链路缺失步骤。
+
+### 一句话总结
+
+第 19 步把后端完整 RAG 工作流通过同步、SSE 和历史接口交给 Vue 使用，至此课程笔记中的文档入库到可追溯问答主链路全部完成。

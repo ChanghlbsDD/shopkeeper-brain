@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -34,6 +35,31 @@ class QueryHistoryMessageRequest(BaseModel):
 
     role: Literal["user", "assistant"]
     content: NonEmptyHistoryContent
+
+
+class QueryHistoryMessageResponse(BaseModel):
+    """前端恢复会话时使用的一条已保存消息。"""
+
+    message_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    rewritten_query: str
+    item_names: list[str]
+    created_at: datetime
+
+
+class QueryHistoryResponse(BaseModel):
+    """一个会话按时间从旧到新排列的历史消息。"""
+
+    session_id: str
+    items: list[QueryHistoryMessageResponse]
+
+
+class QueryHistoryDeleteResponse(BaseModel):
+    """清空一个会话后的删除结果。"""
+
+    session_id: str
+    deleted_count: int
 
 
 class QuerySearchRequest(BaseModel):

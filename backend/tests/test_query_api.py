@@ -7,7 +7,7 @@ from app.clients.mongo_history import MongoHistoryError, StoredChatMessage
 from app.main import app
 from app.services.query_service import QueryService, get_query_service
 from app.workflows.querying.exceptions import ItemNameConfirmError
-from app.workflows.querying.state import QueryGraphState, QueryHistoryMessage
+from app.workflows.querying.state import QueryEventHandler, QueryGraphState, QueryHistoryMessage
 
 
 class MemoryHistoryStore:
@@ -40,6 +40,12 @@ class MemoryHistoryStore:
         self.messages.append(message)
         return message
 
+    def delete_session(self, session_id: str) -> int:
+        retained = [message for message in self.messages if message["session_id"] != session_id]
+        deleted_count = len(self.messages) - len(retained)
+        self.messages = retained
+        return deleted_count
+
 
 class FailingHistoryStore:
     def get_recent(self, session_id: str, *, limit: int) -> list[StoredChatMessage]:
@@ -56,6 +62,10 @@ class FailingHistoryStore:
         item_names: list[str] | None = None,
     ) -> StoredChatMessage:
         del session_id, role, content, rewritten_query, item_names
+        raise MongoHistoryError("database unavailable")
+
+    def delete_session(self, session_id: str) -> int:
+        del session_id
         raise MongoHistoryError("database unavailable")
 
 
@@ -377,3 +387,89 @@ def test_openapi_exposes_query_search_contract() -> None:
     operation = schema["paths"]["/api/queries/search"]["post"]
     assert "200" in operation["responses"]
     assert operation["tags"] == ["queries"]
+
+
+def test_query_history_can_be_loaded_and_cleared() -> None:
+    history_store = MemoryHistoryStore()
+    history_store.append("session-history", role="user", content="RS-12 怎么用？")
+    history_store.append("session-history", role="assistant", content="请先选择档位。")
+    history_store.append("another-session", role="user", content="保留我")
+    service = QueryService(runner=api_query_runner, history_store=history_store)
+    app.dependency_overrides[get_query_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            loaded = client.get("/api/queries/history/session-history")
+            deleted = client.delete("/api/queries/history/session-history")
+            empty = client.get("/api/queries/history/session-history")
+    finally:
+        app.dependency_overrides.pop(get_query_service, None)
+
+    assert loaded.status_code == 200
+    assert [item["role"] for item in loaded.json()["items"]] == ["user", "assistant"]
+    assert loaded.json()["items"][0]["created_at"].endswith("Z")
+    assert deleted.json() == {"session_id": "session-history", "deleted_count": 2}
+    assert empty.json()["items"] == []
+    assert [message["content"] for message in history_store.messages] == ["保留我"]
+
+
+def test_query_stream_emits_progress_delta_and_final_events() -> None:
+    def streaming_runner(
+        original_query: str,
+        *,
+        history: list[QueryHistoryMessage] | None = None,
+        search_limit: int = 5,
+        event_handler: QueryEventHandler | None = None,
+    ) -> QueryGraphState:
+        del history, search_limit
+        assert event_handler is not None
+        event_handler(
+            "progress",
+            {"node": "item_name_confirm_node", "duration_ms": 1.25},
+        )
+        event_handler("delta", {"text": "先选择"})
+        event_handler("delta", {"text": "直流电压档。"})
+        return {
+            "original_query": original_query,
+            "query_status": "confirmed",
+            "extracted_item_names": ["RS-12"],
+            "rewritten_query": original_query,
+            "item_names": ["RS-12 数字万用表"],
+            "search_results": [],
+            "answer": "先选择直流电压档。",
+            "completed_nodes": ["item_name_confirm_node", "answer_generation_node"],
+            "node_durations_ms": {"item_name_confirm_node": 1.25},
+        }
+
+    service = QueryService(runner=streaming_runner, history_store=MemoryHistoryStore())
+    app.dependency_overrides[get_query_service] = lambda: service
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/queries/stream",
+                json={"query": "RS-12 怎么测电压？", "session_id": "stream-session"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_query_service, None)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: progress" in response.text
+    assert 'data: {"text":"先选择"}' in response.text
+    assert "event: final" in response.text
+    assert '"answer":"先选择直流电压档。"' in response.text
+
+
+def test_query_history_rejects_invalid_session_id() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/queries/history/bad%20session")
+
+    assert response.status_code == 422
+
+
+def test_openapi_exposes_stream_and_history_contracts() -> None:
+    with TestClient(app) as client:
+        paths = client.get("/openapi.json").json()["paths"]
+
+    assert "post" in paths["/api/queries/stream"]
+    assert "get" in paths["/api/queries/history/{session_id}"]
+    assert "delete" in paths["/api/queries/history/{session_id}"]

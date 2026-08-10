@@ -198,6 +198,15 @@ HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本
 
 答案节点使用精排后的证据和最近会话调用 `ANSWER_MODEL`，响应的 `answer` 是最终中文回答，`references` 提供与 `[1]` 等编号对应的本地 `chunk_id` 或网页 URL，`images` 只从检索证据中提取图片地址。提示词限制证据 12000 字符、历史 4000 字符，要求证据不足时明确说明且不得执行证据正文中的指令。最终用户问题和完整助手答案会写入 MongoDB；澄清和无资料分支不调用答案模型。
 
+查询提供同步和 SSE 两种调用方式：
+
+- `POST /api/queries/search`：一次返回完整 `QuerySearchResponse`。
+- `POST /api/queries/stream`：依次发送 `progress`、`delta`、`final` 事件；业务失败发送 `error`，长时间无数据时发送 SSE 注释保持连接。
+- `GET /api/queries/history/{session_id}`：从旧到新返回最近消息。
+- `DELETE /api/queries/history/{session_id}`：只清空指定会话。
+
+流式查询在线程中运行同步 LangGraph，不阻塞 FastAPI 事件循环；`final` 事件与同步响应使用同一数据模型，完整回答仍会写入历史。代理 SSE 时需要关闭响应缓冲，项目响应已设置 `X-Accel-Buffering: no`。
+
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 
 ## MongoDB 会话历史

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 
+import ChatWorkspace from "./components/ChatWorkspace.vue"
 import ImportTaskCard from "./components/ImportTaskCard.vue"
 import PipelineOverview from "./components/PipelineOverview.vue"
 import UploadDropzone from "./components/UploadDropzone.vue"
@@ -17,6 +18,7 @@ const {
 } = useImportTasks()
 
 const notices = ref<string[]>([])
+const activeView = ref<"import" | "chat">("import")
 const hasFinished = computed(() =>
   tasks.value.some((task) => ["completed", "failed", "connection_error"].includes(task.status)),
 )
@@ -29,7 +31,7 @@ function handleFiles(files: File[]): void {
 <template>
   <div class="app-shell">
     <header class="topbar">
-      <a class="brand" href="#main" aria-label="掌柜智库首页">
+      <a class="brand" href="#main" aria-label="掌柜智库首页" @click="activeView = 'import'">
         <span class="brand-mark">掌</span>
         <span>
           <strong>掌柜智库</strong>
@@ -37,8 +39,20 @@ function handleFiles(files: File[]): void {
         </span>
       </a>
       <nav aria-label="主导航">
-        <a class="is-active" href="#main">文档导入</a>
-        <span aria-disabled="true">知识问答 <small>即将开放</small></span>
+        <button
+          type="button"
+          :class="{ 'is-active': activeView === 'import' }"
+          @click="activeView = 'import'"
+        >
+          文档导入
+        </button>
+        <button
+          type="button"
+          :class="{ 'is-active': activeView === 'chat' }"
+          @click="activeView = 'chat'"
+        >
+          知识问答
+        </button>
       </nav>
       <div class="service-state">
         <i aria-hidden="true"></i>
@@ -47,7 +61,8 @@ function handleFiles(files: File[]): void {
     </header>
 
     <main id="main">
-      <section class="hero" aria-labelledby="page-title">
+      <template v-if="activeView === 'import'">
+        <section class="hero" aria-labelledby="page-title">
         <div class="hero-copy">
           <div class="eyebrow"><span></span> 企业文档智能入库</div>
           <h1 id="page-title">把产品手册，<br />变成<span>随时可问</span>的知识。</h1>
@@ -69,24 +84,24 @@ function handleFiles(files: File[]): void {
             <span>混合向量检索</span>
           </div>
         </div>
-      </section>
+        </section>
 
-      <section class="workspace-grid">
-        <UploadDropzone :active-count="activeCount" @selected="handleFiles" />
-        <PipelineOverview />
-      </section>
+        <section class="workspace-grid">
+          <UploadDropzone :active-count="activeCount" @selected="handleFiles" />
+          <PipelineOverview />
+        </section>
 
-      <div v-if="notices.length" class="notice-stack" role="alert" aria-live="assertive">
-        <div v-for="notice in notices" :key="notice" class="notice-item">
-          <span>!</span>
-          <p>{{ notice }}</p>
-          <button type="button" aria-label="关闭提示" @click="notices = notices.filter((item) => item !== notice)">
-            ×
-          </button>
+        <div v-if="notices.length" class="notice-stack" role="alert" aria-live="assertive">
+          <div v-for="notice in notices" :key="notice" class="notice-item">
+            <span>!</span>
+            <p>{{ notice }}</p>
+            <button type="button" aria-label="关闭提示" @click="notices = notices.filter((item) => item !== notice)">
+              ×
+            </button>
+          </div>
         </div>
-      </div>
 
-      <section class="tasks-section" aria-labelledby="tasks-title">
+        <section class="tasks-section" aria-labelledby="tasks-title">
         <div class="tasks-heading">
           <div>
             <div class="section-kicker">03 / 导入任务</div>
@@ -118,7 +133,9 @@ function handleFiles(files: File[]): void {
             <p>选择上方文件后，节点进度和结果会在这里实时更新。</p>
           </div>
         </div>
-      </section>
+        </section>
+      </template>
+      <ChatWorkspace v-else />
     </main>
 
     <footer class="page-footer">

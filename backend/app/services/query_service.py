@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from app.clients.mongo_history import (
@@ -14,7 +14,13 @@ from app.clients.mongo_history import (
 )
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError
-from app.schemas.queries import QuerySearchRequest, QuerySearchResponse
+from app.schemas.queries import (
+    QueryHistoryDeleteResponse,
+    QueryHistoryMessageResponse,
+    QueryHistoryResponse,
+    QuerySearchRequest,
+    QuerySearchResponse,
+)
 from app.workflows.querying import run_query_workflow
 from app.workflows.querying.exceptions import (
     ItemNameConfirmError,
@@ -24,7 +30,7 @@ from app.workflows.querying.exceptions import (
     QueryValidationError,
     QueryWorkflowError,
 )
-from app.workflows.querying.state import QueryGraphState, QueryHistoryMessage
+from app.workflows.querying.state import QueryEventHandler, QueryGraphState, QueryHistoryMessage
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +42,7 @@ class QueryWorkflowRunner(Protocol):
         *,
         history: list[QueryHistoryMessage] | None = None,
         search_limit: int = 5,
+        event_handler: QueryEventHandler | None = None,
     ) -> QueryGraphState: ...
 
 
@@ -52,6 +59,8 @@ class QueryHistoryStore(Protocol):
         item_names: list[str] | None = None,
     ) -> StoredChatMessage: ...
 
+    def delete_session(self, session_id: str) -> int: ...
+
 
 class QueryService:
     """校验 API 模型、运行同步召回并统一映射可预期错误。"""
@@ -67,17 +76,24 @@ class QueryService:
         self.runner = runner
         self.history_store = history_store or MongoHistoryStore(self.settings)
 
-    def search(self, request: QuerySearchRequest) -> QuerySearchResponse:
+    def search(
+        self,
+        request: QuerySearchRequest,
+        *,
+        event_handler: QueryEventHandler | None = None,
+    ) -> QuerySearchResponse:
         session_id = request.session_id or uuid4().hex
         history, history_available = self._load_history(session_id, request)
         try:
-            state = self.runner(
-                request.query,
-                history=history,
-                search_limit=(
+            runner_kwargs: dict[str, Any] = {
+                "history": history,
+                "search_limit": (
                     self.settings.query_search_limit if request.limit is None else request.limit
                 ),
-            )
+            }
+            if event_handler is not None:
+                runner_kwargs["event_handler"] = event_handler
+            state = self.runner(request.query, **runner_kwargs)
         except QueryValidationError as exc:
             raise AppError(exc.message, code="INVALID_QUERY", status_code=400) from exc
         except (ItemNameConfirmError, QueryEmbeddingError) as exc:
@@ -131,6 +147,40 @@ class QueryService:
             state,
             session_id=session_id,
             history_persisted=history_persisted,
+        )
+
+    def get_history(self, session_id: str, *, limit: int = 20) -> QueryHistoryResponse:
+        """读取指定会话，供前端刷新后恢复聊天记录。"""
+
+        try:
+            messages = self.history_store.get_recent(session_id, limit=limit)
+        except MongoHistoryError as exc:
+            logger.warning("Query history read failed", exc_info=exc)
+            raise AppError(
+                "会话历史暂时不可用，请稍后重试",
+                code="QUERY_HISTORY_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        return QueryHistoryResponse(
+            session_id=session_id,
+            items=[QueryHistoryMessageResponse.model_validate(message) for message in messages],
+        )
+
+    def clear_history(self, session_id: str) -> QueryHistoryDeleteResponse:
+        """只清空调用方明确指定的一个会话。"""
+
+        try:
+            deleted_count = self.history_store.delete_session(session_id)
+        except MongoHistoryError as exc:
+            logger.warning("Query history delete failed", exc_info=exc)
+            raise AppError(
+                "会话历史暂时无法清空，请稍后重试",
+                code="QUERY_HISTORY_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        return QueryHistoryDeleteResponse(
+            session_id=session_id,
+            deleted_count=deleted_count,
         )
 
     def _load_history(

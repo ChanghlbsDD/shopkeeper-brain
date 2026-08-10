@@ -1,6 +1,6 @@
 # Frontend
 
-掌柜智库前端使用 Vue 3、TypeScript 和 Vite，逐步替换课程中的静态 `import.html` 与 `chat.html`。
+掌柜智库前端使用 Vue 3、TypeScript 和 Vite，已经替换课程中的静态 `import.html` 与 `chat.html`。
 
 ## 安装与启动
 
@@ -30,6 +30,18 @@ npm.cmd run build
 - 按 PDF/Markdown 分支展示节点时间线、进度、耗时、结果和安全错误。
 - 状态查询短暂断线时自动重试，连续失败 5 次后停止轮询并提示重新导入。
 
+## 知识问答页面
+
+从顶部导航进入“知识问答”，页面支持：
+
+- 使用 `POST /api/queries/stream` 接收节点进度、通义千问增量文本和最终结果。
+- 关闭“流式显示回答”后改用 `POST /api/queries/search` 同步返回。
+- 展示本地知识片段或网页来源、证据图片和商品名澄清选项。
+- 在浏览器保存不含密钥的会话 ID，刷新后通过 MongoDB 恢复历史。
+- 经用户确认后清空当前会话；随后自动生成新会话 ID，不影响其他会话。
+
+流式接口使用 `fetch + ReadableStream`，可正确处理一个 JSON 事件被拆到多个网络数据块的情况。前端不会读取或保存百炼、MinerU 等服务的 Token。
+
 生产环境如果前后端不是同域，可在前端构建环境中配置：
 
 ```dotenv
@@ -37,8 +49,3 @@ VITE_API_BASE_URL=https://api.example.com
 ```
 
 不要把密钥放入 `VITE_*` 环境变量；Vite 会把这些值公开到浏览器代码中。
-
-## 后续页面
-
-- 知识问答：流式回答、引用来源与处理状态。
-- 会话历史：加载和清除 MongoDB 中保存的对话。

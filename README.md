@@ -2,7 +2,7 @@
 
 掌柜智库是一个面向企业文档的 RAG（检索增强生成）知识库项目。项目将 PDF 或 Markdown 文档处理为可检索知识，并通过混合向量检索、多路召回、结果融合、重排序和流式回答提供知识问答能力。
 
-本仓库依据课程笔记按功能链路逐步重建。后端使用 Python、FastAPI 和 LangGraph；原课程的静态 HTML 前端将替换为 Vue 3。
+本仓库依据课程笔记按功能链路逐步重建。后端使用 Python、FastAPI 和 LangGraph；原课程的静态 HTML 前端已替换为 Vue 3。目前已经完成文档入库、混合召回、云端精排、带引用回答和会话历史的完整开发链路。
 
 ## 项目结构
 
@@ -15,8 +15,6 @@
 ├── .env.example   # 环境变量模板，不包含真实密钥
 └── README.md
 ```
-
-各子目录将在对应开发步骤中逐步加入可运行代码。目前目录内的 README 用于约定职责，避免尚未实现的占位代码被误认为可运行功能。
 
 ## 安全约定
 
@@ -60,13 +58,15 @@ cd backend
 - 健康检查：`http://localhost:8000/api/health`
 - 文档导入：`POST http://localhost:8000/api/imports`
 - 知识召回：`POST http://localhost:8000/api/queries/search`
+- 流式知识问答：`POST http://localhost:8000/api/queries/stream`
+- 会话历史：`GET/DELETE http://localhost:8000/api/queries/history/{session_id}`
 - Swagger API 文档：`http://localhost:8000/docs`
 
 首次创建虚拟环境、测试和代码检查命令见 [`backend/README.md`](backend/README.md)。
 
 ## 前端开发
 
-文档导入页面使用 Vue 3、TypeScript 和 Vite：
+文档导入与知识问答页面使用 Vue 3、TypeScript 和 Vite：
 
 ```powershell
 cd frontend
@@ -74,7 +74,7 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-访问 `http://localhost:5173`。开发服务器会把 `/api` 请求代理到运行在 `127.0.0.1:8000` 的 FastAPI，因此应先启动后端。前端类型检查、测试、构建和环境变量说明见 [`frontend/README.md`](frontend/README.md)。
+访问 `http://localhost:5173`，用顶部导航切换“文档导入”和“知识问答”。问答页支持 SSE 流式显示、节点进度、来源引用、证据图片、商品澄清以及 MongoDB 会话恢复和清空。开发服务器会把 `/api` 请求代理到运行在 `127.0.0.1:8000` 的 FastAPI，因此应先启动后端。前端类型检查、测试、构建和环境变量说明见 [`frontend/README.md`](frontend/README.md)。
 
 ## 开发记录
 
