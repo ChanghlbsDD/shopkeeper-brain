@@ -1,11 +1,14 @@
 import pytest
 
 from app.clients.dashscope_embedding import TextEmbedding
+from app.core.config import Settings
 from app.workflows.querying.graph import create_query_workflow, route_after_item_name
 from app.workflows.querying.nodes import (
+    HydeSearchNode,
     ItemNameConfirmNode,
     QueryEmbeddingNode,
     VectorSearchNode,
+    WebSearchNode,
 )
 from app.workflows.querying.state import create_query_state
 
@@ -36,19 +39,35 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
                 }
             ]
         ),  # type: ignore[arg-type]
+        hyde_search_node=HydeSearchNode(
+            settings=Settings(_env_file=None, query_hyde_enabled=True),
+            document_generator=lambda _query, _names: "假设技术文档",
+            embedder=lambda _text: TextEmbedding([0.3, 0.4], {8: 0.7}),
+            searcher=lambda _dense, _sparse, _names, _limit: [],
+        ),
+        web_search_node=WebSearchNode(
+            settings=Settings(_env_file=None, web_search_enabled=True),
+            searcher=lambda _query, _count: [],
+        ),
     )
 
     result = workflow.invoke(create_query_state("它怎么测直流电压？", search_limit=3))
 
-    assert result["completed_nodes"] == [
+    assert result["completed_nodes"][:2] == [
         "item_name_confirm_node",
         "query_embedding_node",
-        "vector_search_node",
     ]
+    assert set(result["completed_nodes"][2:]) == {
+        "vector_search_node",
+        "hyde_search_node",
+        "web_search_node",
+    }
     assert result["item_names"] == ["RS-12 数字万用表"]
     assert result["query_status"] == "confirmed"
     assert result["query_dense_vector"] == [0.1, 0.2]
     assert result["search_results"][0]["chunk_id"] == 42
+    assert result["hyde_status"] == "succeeded"
+    assert result["web_search_status"] == "succeeded"
     assert set(result["node_durations_ms"]) == set(result["completed_nodes"])
 
 

@@ -2596,3 +2596,144 @@ item_name_confirm_node
 ### 一句话总结
 
 第 14 步让查询链路能够把口语商品名对齐到知识库标准名称、在歧义时主动澄清，并通过 MongoDB 延续多轮会话上下文。
+
+## 第 15 步：直接向量、HyDE 与网页三路召回
+
+日期：2026-08-10
+
+### 本步目标
+
+还原课程 day11 的三路检索：保留第 13 步已有的直接 Milvus 混合检索，新增 HyDE 假设文档检索和阿里云百炼 WebSearch MCP 检索。商品名确认后先生成一次直接查询向量，再让三个召回节点在 LangGraph 同一阶段并行执行，分别保存结果，为下一步 RRF 融合排序提供输入。
+
+本步仍不生成最终答案，也不把三路结果混成一个排名。网页搜索默认关闭；HyDE 和网页分支出现故障时只标记该分支失败，不中断直接知识库检索。
+
+### 与上一步的目录区别
+
+第 14 步只有直接向量检索。本步新增目录项如下：
+
+```text
+backend/
+├─ app/
+│  ├─ clients/
+│  │  └─ dashscope_web_search.py
+│  └─ workflows/querying/nodes/
+│     ├─ hyde_search.py
+│     └─ web_search.py
+└─ tests/
+   ├─ test_dashscope_web_search.py
+   └─ test_multi_retrieval_nodes.py
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/dashscope_web_search.py` | 使用现有 `httpx` 完成 MCP Streamable HTTP 初始化、工具调用、SSE/JSON 响应解析和会话关闭，只返回网页标题、URL 与摘要。 |
+| `backend/app/workflows/querying/nodes/hyde_search.py` | 调用通义千问生成 200～300 字假设技术文档，把“问题 + 假设文档”向量化后执行第二路 Milvus 混合检索。 |
+| `backend/app/workflows/querying/nodes/web_search.py` | 根据开关调用百炼 `bailian_web_search` 工具；关闭或失败时返回明确状态和空结果。 |
+| `backend/tests/test_dashscope_web_search.py` | 用内存 HTTP 传输验证 MCP 握手、会话头、工具参数、SSE/JSON 解析、结果清洗和缺少 Token 的错误。 |
+| `backend/tests/test_multi_retrieval_nodes.py` | 验证 HyDE 的生成—向量化—检索链路、故障降级，以及网页分支的开关、问题和数量参数。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `.env.example` | 增加 HyDE 开关、模型和输出长度，以及 WebSearch MCP 地址、数量和超时配置；网页搜索保持默认关闭。 |
+| `backend/README.md` | 说明三路结果字段、API 调用成本、开关和分支降级规则。 |
+| `backend/app/clients/qwen_chat.py` | 在原 JSON mode 之外增加普通文本响应方法，供 HyDE 生成自然语言技术文档。 |
+| `backend/app/core/config.py` | 增加 HyDE 与网页搜索配置及启用时的模型、URL 校验。 |
+| `backend/app/schemas/queries.py` | 保留 `matches` 兼容字段，并新增 `hyde_matches`、`web_matches` 和两个分支状态。 |
+| `backend/app/workflows/querying/base.py` | 节点改为只返回状态增量，使并行节点不会重复覆盖整个查询状态。 |
+| `backend/app/workflows/querying/state.py` | 增加 HyDE 文档、两路新结果和分支状态，并为完成节点列表和耗时字典配置并行合并器。 |
+| `backend/app/workflows/querying/graph.py` | 查询向量节点后同时连接直接向量、HyDE 和网页三个召回节点。 |
+| `backend/app/workflows/querying/nodes/item_name_confirm.py` | 所有分支显式返回空商品名、候选或澄清字段，适配状态增量写入。 |
+| `backend/app/workflows/querying/nodes/__init__.py` | 导出两个新增召回节点。 |
+| `backend/tests/test_query_workflow.py` | 注入三路假客户端，验证并行节点全部执行且状态、耗时正确合并。 |
+| `backend/tests/test_qwen_chat_client.py` | 验证普通文本请求不携带 JSON mode 参数。 |
+| `backend/tests/test_query_api.py` | 验证 API 安全返回三路结果和分支状态，仍不泄露内部查询向量。 |
+
+### 查询图变化
+
+```text
+START
+  ↓
+item_name_confirm_node
+  ├─ needs_clarification / unrecognized ───────────────→ END
+  └─ confirmed
+       ↓
+query_embedding_node
+       ├─ vector_search_node ──────────────────────────→ END
+       ├─ hyde_search_node ────────────────────────────→ END
+       └─ web_search_node（默认关闭）──────────────────→ END
+```
+
+`query_embedding_node` 仍只为直接检索生成问题向量。HyDE 节点需要用“问题 + 假设文档”生成自己的第二组查询向量；网页节点直接把改写后的问题交给搜索服务，不使用 Milvus 向量。
+
+### 三路召回分别解决什么问题
+
+- 直接向量检索忠实于用户原问题，成本最低，是主要知识库召回路线。
+- HyDE 先猜一段可能的手册答案，再用答案中的专业词和操作描述搜索，适合用户问题过短、口语化或与手册措辞差异较大的情况。
+- 网页检索补充知识库外部或较新的信息，但内容质量和稳定性不如内部手册，所以默认关闭并保留独立结果。
+
+三路结果暂不直接相加，因为 Milvus 相似度和网页搜索顺序不是同一种分数。下一步会使用基于名次的 RRF，避免直接比较不同来源的原始分值。
+
+### API 响应变化
+
+```json
+{
+  "matches": [],
+  "hyde_status": "succeeded",
+  "hyde_matches": [],
+  "web_search_status": "disabled",
+  "web_matches": []
+}
+```
+
+`matches` 继续表示直接 Milvus 结果，避免破坏前一步调用方；两个新数组保留各自来源。`hyde_document` 只在工作流内部传递，不返回给前端，查询向量、Token、MCP 会话 ID 和上游错误正文同样不会暴露。
+
+### 配置与调用成本
+
+```dotenv
+QUERY_HYDE_ENABLED=true
+QUERY_HYDE_MODEL=qwen-flash
+QUERY_HYDE_MAX_OUTPUT_TOKENS=512
+WEB_SEARCH_ENABLED=false
+MCP_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp
+WEB_SEARCH_COUNT=3
+WEB_SEARCH_TIMEOUT_SECONDS=60
+```
+
+HyDE 默认开启，每次商品名确认成功的查询会额外调用一次通义千问文本生成和一次百炼向量 API，然后再查询一次本地 Milvus；不需要时可关闭。网页搜索默认不调用任何外部服务，开启后复用 `DASHSCOPE_API_KEY`。这两个节点不加载本地 AI 模型，因此不会明显增加 2 核 2 GiB 服务器的常驻内存，主要增加请求时间、API 次数和少量并发网络连接。
+
+MCP 客户端没有引入课程中的完整 Agent 框架，而是使用项目已有的 `httpx` 实现当前百炼端点使用的 Streamable HTTP 交互，从而减少服务器依赖和安装体积。实现包含协议版本、会话头、初始化通知、工具调用以及关闭会话，并同时兼容 JSON 与 SSE 响应。
+
+### 故障与安全边界
+
+- 直接 Milvus 检索仍是主路径；它失败时沿用统一查询错误处理。
+- HyDE 的通义千问、向量或 Milvus 请求失败时，返回 `hyde_status=failed` 和空数组。
+- 网页 MCP 连接、鉴权或响应解析失败时，返回 `web_search_status=failed` 和空数组。
+- 网页 URL 只接受 `http://` 或 `https://`，无效页面被跳过；上游错误正文和认证信息不会进入 API 响应。
+- 网页检索会把改写后的用户问题发送给外部服务，处理敏感问题前应评估数据合规要求。
+
+### 测试与验证
+
+- Ruff 静态检查与格式检查通过。
+- Pytest 共 228 个测试通过，5 个显式集成测试默认跳过。
+- 新测试全部使用注入客户端或 `httpx.MockTransport`，不依赖真实 Token、网络或知识库集合。
+- 完整测试覆盖旧的导入、切分、商品名识别、会话历史和直接检索功能，说明状态增量与并行合并没有破坏前 14 步。
+- 第一次运行改造后的旧工作流测试时，测试尚未注入 HyDE 替身，意外执行了 1 次通义千问 HyDE 生成和 1 次百炼向量请求；随后在 Milvus 空集合处降级，没有写入任何知识库或会话数据。测试现已注入三路替身，后续单元测试不再访问真实 API。
+
+### 当前边界
+
+- 当前没有可用的 `knowledge_chunks` 集合，因此本步没有执行三路真实端到端查询；要先通过导入页面导入文档。
+- HyDE 生成内容可能有事实错误，它只用于改善召回，不能直接作为最终答案展示。
+- 网页结果目前只有搜索摘要，没有抓取和清洗网页全文。
+- 三路结果仍是独立列表，存在重复片段，也没有统一名次或相关性阈值。
+
+### 下一步
+
+第 16 步将实现 RRF 多路融合：按直接向量、HyDE 和网页结果各自的名次计算融合分数，去重后形成统一候选列表，为重排和最终答案生成准备上下文。
+
+### 一句话总结
+
+第 15 步让已确认的问题能够并行执行直接知识库、HyDE 扩展和可选网页三路召回，并以可降级、可追踪的独立结果为下一步融合排序做好准备。

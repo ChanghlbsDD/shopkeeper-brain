@@ -36,19 +36,12 @@ class BaseQueryNode(ABC):
             ) from exc
 
         duration_ms = round((perf_counter() - started_at) * 1000, 3)
-        result: QueryGraphState = dict(state)
-        result.update(updates)
-
-        completed_nodes = list(result.get("completed_nodes", []))
-        completed_nodes.append(self.name)
-        result["completed_nodes"] = completed_nodes
-
-        node_durations = dict(result.get("node_durations_ms", {}))
-        node_durations[self.name] = duration_ms
-        result["node_durations_ms"] = node_durations
+        result: QueryGraphState = dict(updates)
+        result["completed_nodes"] = [self.name]
+        result["node_durations_ms"] = {self.name: duration_ms}
         self.logger.info("Query node completed: %s (%.3f ms)", self.name, duration_ms)
         return result
 
     @abstractmethod
     def process(self, state: QueryGraphState) -> Mapping[str, object]:
-        """执行节点业务并返回状态更新。"""
+        """执行节点业务并返回状态增量。"""

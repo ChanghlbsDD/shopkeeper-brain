@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     query_item_name_score_gap: float = Field(default=0.15, ge=0, le=1)
     query_item_name_dense_weight: float = Field(default=0.5, ge=0, le=1)
     query_item_name_sparse_weight: float = Field(default=0.5, ge=0, le=1)
+    query_hyde_enabled: bool = True
+    query_hyde_model: str = "qwen-flash"
+    query_hyde_max_output_tokens: int = Field(default=512, ge=64, le=2048)
+    web_search_enabled: bool = False
+    mcp_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
+    web_search_count: int = Field(default=3, ge=1, le=10)
+    web_search_timeout_seconds: float = Field(default=60, gt=0, le=300)
 
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
@@ -110,6 +117,12 @@ class Settings(BaseSettings):
             raise ValueError("商品名中置信阈值不能高于高置信阈值")
         if self.query_item_name_dense_weight + self.query_item_name_sparse_weight <= 0:
             raise ValueError("商品名稠密和稀疏向量权重不能同时为 0")
+        if self.query_hyde_enabled and not self.query_hyde_model.strip():
+            raise ValueError("QUERY_HYDE_MODEL 不能为空")
+        if self.web_search_enabled and not self.mcp_dashscope_base_url.startswith(
+            ("https://", "http://")
+        ):
+            raise ValueError("MCP_DASHSCOPE_BASE_URL 配置无效")
         return self
 
     @property

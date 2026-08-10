@@ -13,7 +13,7 @@ class QwenChatError(Exception):
 
 
 class QwenChatClient:
-    """发送结构化 JSON 请求，不依赖完整 OpenAI 或 LangChain 客户端。"""
+    """发送 JSON 或普通文本请求，不依赖完整 OpenAI/LangChain 客户端。"""
 
     def __init__(
         self,
@@ -35,10 +35,40 @@ class QwenChatClient:
         self.client = client
 
     def create_json_completion(self, *, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        """调用 JSON mode，并把首个回答解析为字典。"""
+        """调用 JSON mode，并把第一个回答解析为字典。"""
 
+        content = self._create_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            json_mode=True,
+        )
+        normalized_content = self._strip_code_fence(content)
+        try:
+            result = json.loads(normalized_content)
+        except json.JSONDecodeError as exc:
+            raise QwenChatError("通义千问没有返回有效 JSON") from exc
+        if not isinstance(result, dict):
+            raise QwenChatError("通义千问 JSON 顶层必须是对象")
+        return result
+
+    def create_text_completion(self, *, system_prompt: str, user_prompt: str) -> str:
+        """调用普通文本模式，用于生成 HyDE 假设文档等自然语言内容。"""
+
+        return self._create_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            json_mode=False,
+        )
+
+    def _create_completion(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool,
+    ) -> str:
         self._validate_configuration()
-        request_body = {
+        request_body: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -46,8 +76,9 @@ class QwenChatClient:
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
         }
+        if json_mode:
+            request_body["response_format"] = {"type": "json_object"}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -79,15 +110,7 @@ class QwenChatClient:
             raise QwenChatError("通义千问响应结构不完整") from exc
         if not isinstance(content, str) or not content.strip():
             raise QwenChatError("通义千问没有返回有效内容")
-
-        normalized_content = self._strip_code_fence(content)
-        try:
-            result = json.loads(normalized_content)
-        except json.JSONDecodeError as exc:
-            raise QwenChatError("通义千问没有返回有效 JSON") from exc
-        if not isinstance(result, dict):
-            raise QwenChatError("通义千问 JSON 顶层必须是对象")
-        return result
+        return content.strip()
 
     def _validate_configuration(self) -> None:
         if not self.api_key:

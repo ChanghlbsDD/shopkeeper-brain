@@ -75,6 +75,8 @@ class ItemNameConfirmNode(BaseQueryNode):
             return {
                 **normalized,
                 "query_status": "unrecognized",
+                "item_names": [],
+                "item_name_options": [],
                 "clarification": (
                     "抱歉，我无法识别您询问的具体产品名称，请提供更准确的产品名称或型号。"
                 ),
@@ -110,10 +112,14 @@ class ItemNameConfirmNode(BaseQueryNode):
                 **normalized,
                 "query_status": "confirmed",
                 "item_names": confirmed,
+                "item_name_options": [],
+                "clarification": "",
             }
         return {
             **normalized,
             "query_status": "unrecognized",
+            "item_names": [],
+            "item_name_options": [],
             "clarification": "抱歉，知识库中没有匹配的产品，请提供更准确的产品名称或型号。",
         }
 

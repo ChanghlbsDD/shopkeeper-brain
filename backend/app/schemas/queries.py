@@ -60,6 +60,14 @@ class QuerySearchHitResponse(BaseModel):
     part: int | None = None
 
 
+class QueryWebSearchHitResponse(BaseModel):
+    """网页检索结果中允许返回给前端的字段。"""
+
+    title: str
+    url: str
+    snippet: str
+
+
 class QuerySearchResponse(BaseModel):
     """商品名确认、问题改写和混合召回结果。"""
 
@@ -73,6 +81,10 @@ class QuerySearchResponse(BaseModel):
     item_name_options: list[str]
     clarification: str
     matches: list[QuerySearchHitResponse]
+    hyde_status: Literal["pending", "disabled", "succeeded", "failed"]
+    hyde_matches: list[QuerySearchHitResponse]
+    web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
+    web_matches: list[QueryWebSearchHitResponse]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
@@ -104,6 +116,16 @@ class QuerySearchResponse(BaseModel):
             matches=[
                 QuerySearchHitResponse.model_validate(hit)
                 for hit in state.get("search_results", [])
+            ],
+            hyde_status=state.get("hyde_status", "pending"),
+            hyde_matches=[
+                QuerySearchHitResponse.model_validate(hit)
+                for hit in state.get("hyde_search_results", [])
+            ],
+            web_search_status=state.get("web_search_status", "pending"),
+            web_matches=[
+                QueryWebSearchHitResponse.model_validate(hit)
+                for hit in state.get("web_search_results", [])
             ],
             completed_nodes=list(state.get("completed_nodes", [])),
             node_durations_ms=dict(state.get("node_durations_ms", {})),

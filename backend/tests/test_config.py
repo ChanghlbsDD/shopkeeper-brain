@@ -136,6 +136,10 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
     assert settings.query_item_name_sparse_weight == 0.5
     assert settings.mongo_chat_collection == "chat_messages"
     assert settings.mongo_request_timeout_seconds == 5
+    assert settings.query_hyde_enabled is True
+    assert settings.query_hyde_model == "qwen-flash"
+    assert settings.web_search_enabled is False
+    assert settings.web_search_count == 3
 
     with pytest.raises(ValidationError, match="不能同时为 0"):
         Settings(
@@ -156,4 +160,14 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
             _env_file=None,
             query_item_name_dense_weight=0,
             query_item_name_sparse_weight=0,
+        )
+
+    with pytest.raises(ValidationError, match="QUERY_HYDE_MODEL"):
+        Settings(_env_file=None, query_hyde_enabled=True, query_hyde_model=" ")
+
+    with pytest.raises(ValidationError, match="MCP_DASHSCOPE_BASE_URL"):
+        Settings(
+            _env_file=None,
+            web_search_enabled=True,
+            mcp_dashscope_base_url="not-a-url",
         )

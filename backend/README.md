@@ -158,11 +158,22 @@ QUERY_ITEM_NAME_MID_CONFIDENCE=0.6
 QUERY_ITEM_NAME_SCORE_GAP=0.15
 QUERY_ITEM_NAME_DENSE_WEIGHT=0.5
 QUERY_ITEM_NAME_SPARSE_WEIGHT=0.5
+QUERY_HYDE_ENABLED=true
+QUERY_HYDE_MODEL=qwen-flash
+QUERY_HYDE_MAX_OUTPUT_TOKENS=512
+WEB_SEARCH_ENABLED=false
+MCP_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp
+WEB_SEARCH_COUNT=3
+WEB_SEARCH_TIMEOUT_SECONDS=60
 ```
 
 候选对齐复用 `knowledge_chunks` 的现有向量，并通过 `group_by_field=item_name` 保证不同商品都能进入候选，不再维护重复的商品名集合。精确名称直接确认；唯一高置信候选直接确认；多个高置信候选只有头部分差达到阈值才自动确认，否则进入 `needs_clarification`；只有中置信候选时同样要求用户选择。阈值是当前开发初值，生产数据准备好后需要用真实问题集评估。
 
 名称确认后，知识片段检索使用参数化表达式 `item_name in {item_names}` 限制范围，避免直接拼接用户内容。API 最多接收 10 条客户端启动历史、每条 2000 字符，结果数量限制为 1～20。响应新增 `session_id`、`status`、`item_name_options`、`clarification` 和 `history_persisted`；仍不会返回查询向量、Token 或异常堆栈。
+
+确认商品名并生成查询向量后，LangGraph 会并行执行三路召回：`matches` 是改写问题的直接 Milvus 混合检索，`hyde_matches` 是通义千问先生成假设技术文档、再向量化并检索得到的结果，`web_matches` 是可选的百炼 WebSearch MCP 结果。响应同时返回 `hyde_status` 和 `web_search_status`，取值为 `pending`、`disabled`、`succeeded` 或 `failed`。
+
+HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本生成和一次百炼向量请求；不需要时可设置 `QUERY_HYDE_ENABLED=false`。网页检索默认关闭，只有设置 `WEB_SEARCH_ENABLED=true` 才会使用同一个 `DASHSCOPE_API_KEY` 调用外部网页搜索。HyDE 或网页分支失败时会返回空结果并标记 `failed`，已有的直接知识库检索仍可继续；当前步骤只保留三路原始结果，尚未进行 RRF 融合排序。
 
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 

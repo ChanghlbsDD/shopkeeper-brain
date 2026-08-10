@@ -88,6 +88,10 @@ def api_query_runner(
                 "part": 1,
             }
         ],
+        "hyde_status": "succeeded",
+        "hyde_search_results": [],
+        "web_search_status": "disabled",
+        "web_search_results": [],
         "completed_nodes": [
             "item_name_confirm_node",
             "query_embedding_node",
@@ -129,6 +133,10 @@ def test_query_search_returns_safe_retrieval_result(query_service: QueryService)
     assert payload["item_names"] == ["RS-12 数字万用表"]
     assert payload["matches"][0]["chunk_id"] == 42
     assert payload["matches"][0]["score"] == 0.91
+    assert payload["hyde_status"] == "succeeded"
+    assert payload["hyde_matches"] == []
+    assert payload["web_search_status"] == "disabled"
+    assert payload["web_matches"] == []
     assert "query_dense_vector" not in payload
     assert "query_sparse_vector" not in payload
 

@@ -56,6 +56,22 @@ def test_accepts_json_wrapped_in_markdown_fence() -> None:
     assert result["item_name"] == "示波器"
 
 
+def test_text_completion_does_not_request_json_mode() -> None:
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.read().decode("utf-8")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "假设文档"}}]})
+
+    result = create_client(handler).create_text_completion(
+        system_prompt="技术文档专家",
+        user_prompt="生成假设文档",
+    )
+
+    assert result == "假设文档"
+    assert "response_format" not in captured["body"]
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

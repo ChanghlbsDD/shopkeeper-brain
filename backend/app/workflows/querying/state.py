@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import operator
 from copy import deepcopy
-from typing import Literal, TypedDict
+from typing import Annotated, Literal, TypedDict
 
+from app.clients.dashscope_web_search import WebSearchResult
 from app.clients.milvus_search import MilvusSearchHit
+
+
+def merge_node_durations(left: dict[str, float], right: dict[str, float]) -> dict[str, float]:
+    """合并并行节点各自写入的耗时。"""
+
+    return {**left, **right}
 
 
 class QueryHistoryMessage(TypedDict):
@@ -16,7 +24,7 @@ class QueryHistoryMessage(TypedDict):
 
 
 class QueryGraphState(TypedDict, total=False):
-    """在商品名确认、向量化和召回节点之间传递的数据。"""
+    """在商品名确认、向量化和三路召回节点之间传递的数据。"""
 
     original_query: str
     history: list[QueryHistoryMessage]
@@ -30,8 +38,13 @@ class QueryGraphState(TypedDict, total=False):
     query_dense_vector: list[float]
     query_sparse_vector: dict[int, float]
     search_results: list[MilvusSearchHit]
-    completed_nodes: list[str]
-    node_durations_ms: dict[str, float]
+    hyde_status: Literal["pending", "disabled", "succeeded", "failed"]
+    hyde_document: str
+    hyde_search_results: list[MilvusSearchHit]
+    web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
+    web_search_results: list[WebSearchResult]
+    completed_nodes: Annotated[list[str], operator.add]
+    node_durations_ms: Annotated[dict[str, float], merge_node_durations]
 
 
 DEFAULT_QUERY_STATE: QueryGraphState = {
@@ -47,6 +60,11 @@ DEFAULT_QUERY_STATE: QueryGraphState = {
     "query_dense_vector": [],
     "query_sparse_vector": {},
     "search_results": [],
+    "hyde_status": "pending",
+    "hyde_document": "",
+    "hyde_search_results": [],
+    "web_search_status": "pending",
+    "web_search_results": [],
     "completed_nodes": [],
     "node_durations_ms": {},
 }
