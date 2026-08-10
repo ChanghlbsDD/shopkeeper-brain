@@ -18,6 +18,7 @@ from app.schemas.queries import QuerySearchRequest, QuerySearchResponse
 from app.workflows.querying import run_query_workflow
 from app.workflows.querying.exceptions import (
     ItemNameConfirmError,
+    QueryAnswerError,
     QueryEmbeddingError,
     QuerySearchError,
     QueryValidationError,
@@ -105,6 +106,19 @@ class QueryService:
                 code="QUERY_SEARCH_UNAVAILABLE",
                 status_code=503,
             ) from exc
+        except QueryAnswerError as exc:
+            logger.warning("Query answer generation failed", exc_info=exc)
+            if "未配置" in exc.message:
+                raise AppError(
+                    "答案生成所需的通义千问 Token 尚未配置",
+                    code="QUERY_ANSWER_NOT_CONFIGURED",
+                    status_code=503,
+                ) from exc
+            raise AppError(
+                "答案生成服务暂时不可用",
+                code="QUERY_ANSWER_UNAVAILABLE",
+                status_code=502,
+            ) from exc
         except QueryWorkflowError as exc:
             logger.exception("Query workflow failed at %s", exc.node_name)
             raise AppError(
@@ -162,12 +176,13 @@ class QueryService:
                 rewritten_query=state.get("rewritten_query", ""),
                 item_names=list(state.get("item_names", [])),
             )
-            clarification = state.get("clarification", "")
-            if clarification:
+            assistant_answer = state.get("answer", "") or state.get("clarification", "")
+            if assistant_answer:
                 self.history_store.append(
                     session_id,
                     role="assistant",
-                    content=clarification,
+                    content=assistant_answer,
+                    rewritten_query=state.get("rewritten_query", ""),
                     item_names=list(state.get("item_names", [])),
                 )
         except MongoHistoryError as exc:

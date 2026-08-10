@@ -39,6 +39,15 @@ class BaseQueryNode(ABC):
         result: QueryGraphState = dict(updates)
         result["completed_nodes"] = [self.name]
         result["node_durations_ms"] = {self.name: duration_ms}
+        event_handler = state.get("event_handler")
+        if callable(event_handler):
+            try:
+                event_handler(
+                    "progress",
+                    {"node": self.name, "duration_ms": duration_ms},
+                )
+            except Exception:
+                self.logger.warning("Query event handler failed", exc_info=True)
         self.logger.info("Query node completed: %s (%.3f ms)", self.name, duration_ms)
         return result
 

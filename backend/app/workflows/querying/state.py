@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Annotated, Literal, TypedDict
 
@@ -50,6 +51,20 @@ class RerankDocument(TypedDict):
     rerank_score: float | None
 
 
+class AnswerReference(TypedDict):
+    """最终答案可展示的证据引用。"""
+
+    reference_id: str
+    source: Literal["local", "web"]
+    title: str
+    chunk_id: int | None
+    url: str
+    rerank_score: float | None
+
+
+QueryEventHandler = Callable[[str, dict[str, object]], None]
+
+
 class QueryGraphState(TypedDict, total=False):
     """在商品名确认、向量化和三路召回节点之间传递的数据。"""
 
@@ -71,6 +86,10 @@ class QueryGraphState(TypedDict, total=False):
     rrf_results: list[RrfSearchHit]
     rerank_status: Literal["pending", "disabled", "succeeded", "failed", "skipped"]
     reranked_documents: list[RerankDocument]
+    answer: str
+    answer_references: list[AnswerReference]
+    answer_images: list[str]
+    event_handler: QueryEventHandler
     web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
     web_search_results: list[WebSearchResult]
     completed_nodes: Annotated[list[str], operator.add]
@@ -96,6 +115,9 @@ DEFAULT_QUERY_STATE: QueryGraphState = {
     "rrf_results": [],
     "rerank_status": "pending",
     "reranked_documents": [],
+    "answer": "",
+    "answer_references": [],
+    "answer_images": [],
     "web_search_status": "pending",
     "web_search_results": [],
     "completed_nodes": [],
@@ -108,6 +130,7 @@ def create_query_state(
     *,
     history: list[QueryHistoryMessage] | None = None,
     search_limit: int = 5,
+    event_handler: QueryEventHandler | None = None,
 ) -> QueryGraphState:
     """创建彼此隔离的查询初始状态。"""
 
@@ -119,4 +142,6 @@ def create_query_state(
             "search_limit": search_limit,
         }
     )
+    if event_handler is not None:
+        state["event_handler"] = event_handler
     return state

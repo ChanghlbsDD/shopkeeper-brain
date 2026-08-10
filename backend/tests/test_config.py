@@ -149,6 +149,9 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
     assert settings.rerank_min_top_k == 3
     assert settings.rerank_max_top_k == 10
     assert settings.rerank_gap_abs == 0.15
+    assert settings.answer_model == "qwen-flash"
+    assert settings.answer_context_max_length == 12_000
+    assert settings.answer_max_images == 5
 
     with pytest.raises(ValidationError, match="不能同时为 0"):
         Settings(

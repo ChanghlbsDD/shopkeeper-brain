@@ -118,6 +118,11 @@ class Settings(BaseSettings):
     rerank_min_top_k: int = Field(default=3, ge=1, le=100)
     rerank_max_top_k: int = Field(default=10, ge=1, le=100)
     rerank_gap_abs: float = Field(default=0.15, ge=0, le=1)
+    answer_model: str = "qwen-flash"
+    answer_max_output_tokens: int = Field(default=1024, ge=128, le=8192)
+    answer_context_max_length: int = Field(default=12_000, ge=1000, le=100_000)
+    answer_history_max_length: int = Field(default=4000, ge=100, le=50_000)
+    answer_max_images: int = Field(default=5, ge=0, le=20)
 
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
@@ -144,6 +149,8 @@ class Settings(BaseSettings):
                 raise ValueError("RERANK_MODEL 不能为空")
         if self.rerank_min_top_k > self.rerank_max_top_k:
             raise ValueError("RERANK_MIN_TOP_K 不能大于 RERANK_MAX_TOP_K")
+        if not self.answer_model.strip():
+            raise ValueError("ANSWER_MODEL 不能为空")
         return self
 
     @property

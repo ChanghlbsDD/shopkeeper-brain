@@ -72,6 +72,27 @@ def test_text_completion_does_not_request_json_mode() -> None:
     assert "response_format" not in captured["body"]
 
 
+def test_stream_text_completion_yields_sse_deltas() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = request.read().decode("utf-8")
+        assert '"stream":true' in body
+        stream_body = (
+            'data: {"choices":[{"delta":{"content":"第一段"}}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"第二段"}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(200, text=stream_body, headers={"content-type": "text/event-stream"})
+
+    chunks = list(
+        create_client(handler).stream_text_completion(
+            system_prompt="系统",
+            user_prompt="问题",
+        )
+    )
+
+    assert chunks == ["第一段", "第二段"]
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

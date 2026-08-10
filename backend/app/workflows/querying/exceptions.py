@@ -41,3 +41,7 @@ class QueryEmbeddingError(QueryWorkflowError):
 
 class QuerySearchError(QueryWorkflowError):
     """Milvus 无法完成知识片段召回。"""
+
+
+class QueryAnswerError(QueryWorkflowError):
+    """通义千问无法根据检索证据生成最终答案。"""

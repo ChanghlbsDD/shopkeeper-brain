@@ -118,6 +118,18 @@ def api_query_runner(
                 "rerank_score": 0.97,
             }
         ],
+        "answer": "将旋钮转到直流电压档后并联测量。[1]",
+        "answer_references": [
+            {
+                "reference_id": "1",
+                "source": "local",
+                "title": "直流电压测量",
+                "chunk_id": 42,
+                "url": "",
+                "rerank_score": 0.97,
+            }
+        ],
+        "answer_images": ["http://localhost:9000/images/voltage.png"],
         "completed_nodes": [
             "item_name_confirm_node",
             "query_embedding_node",
@@ -169,6 +181,9 @@ def test_query_search_returns_safe_retrieval_result(query_service: QueryService)
     assert payload["rerank_status"] == "succeeded"
     assert payload["ranked_matches"][0]["chunk_id"] == 42
     assert payload["ranked_matches"][0]["rerank_score"] == 0.97
+    assert payload["answer"] == "将旋钮转到直流电压档后并联测量。[1]"
+    assert payload["references"][0]["chunk_id"] == 42
+    assert payload["images"] == ["http://localhost:9000/images/voltage.png"]
     assert "query_dense_vector" not in payload
     assert "query_sparse_vector" not in payload
 

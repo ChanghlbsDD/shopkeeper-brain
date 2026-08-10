@@ -95,6 +95,17 @@ class QueryRerankDocumentResponse(BaseModel):
     rerank_score: float | None
 
 
+class QueryAnswerReferenceResponse(BaseModel):
+    """答案引用的本地片段或网页来源。"""
+
+    reference_id: str
+    source: Literal["local", "web"]
+    title: str
+    chunk_id: int | None
+    url: str
+    rerank_score: float | None
+
+
 class QuerySearchResponse(BaseModel):
     """商品名确认、问题改写和混合召回结果。"""
 
@@ -115,6 +126,9 @@ class QuerySearchResponse(BaseModel):
     fused_matches: list[QueryRrfSearchHitResponse]
     rerank_status: Literal["pending", "disabled", "succeeded", "failed", "skipped"]
     ranked_matches: list[QueryRerankDocumentResponse]
+    answer: str
+    references: list[QueryAnswerReferenceResponse]
+    images: list[str]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
@@ -166,6 +180,12 @@ class QuerySearchResponse(BaseModel):
                 QueryRerankDocumentResponse.model_validate(document)
                 for document in state.get("reranked_documents", [])
             ],
+            answer=state.get("answer", "") or state.get("clarification", ""),
+            references=[
+                QueryAnswerReferenceResponse.model_validate(reference)
+                for reference in state.get("answer_references", [])
+            ],
+            images=list(state.get("answer_images", [])),
             completed_nodes=list(state.get("completed_nodes", [])),
             node_durations_ms=dict(state.get("node_durations_ms", {})),
         )

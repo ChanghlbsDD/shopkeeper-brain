@@ -173,6 +173,11 @@ RERANK_DOCUMENT_MAX_LENGTH=8000
 RERANK_MIN_TOP_K=3
 RERANK_MAX_TOP_K=10
 RERANK_GAP_ABS=0.15
+ANSWER_MODEL=qwen-flash
+ANSWER_MAX_OUTPUT_TOKENS=1024
+ANSWER_CONTEXT_MAX_LENGTH=12000
+ANSWER_HISTORY_MAX_LENGTH=4000
+ANSWER_MAX_IMAGES=5
 WEB_SEARCH_ENABLED=false
 MCP_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp
 WEB_SEARCH_COUNT=3
@@ -190,6 +195,8 @@ HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本
 直接检索与 HyDE 结果会按 `weight / (k + rank)` 计算 RRF 分数，以 `chunk_id` 去重后写入 `fused_matches`。默认 `k=60`、两路权重均为 `1.0`，最多保留 10 条；`source_paths` 标明片段来自 `vector`、`hyde` 或同时命中两路。原始 `matches` 和 `hyde_matches` 仍保留用于调试。网页结果没有本地 `chunk_id`，按课程流程不进入本轮 RRF，将在下一阶段与融合后的本地片段一起重排。
 
 `ranked_matches` 会合并 RRF 本地候选和网页摘要，再调用百炼文本重排 API 计算统一的 `rerank_score`。当前默认使用无需本地模型的 `gte-rerank-v2`；若使用 `qwen3-rerank`，需把 `RERANK_API_BASE` 改为百炼业务空间的 `compatible-api/v1` 地址。模型和接口差异见[百炼文本排序官方文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)。排序后至少保留 3 条、最多 10 条，并在最大相邻分数落差超过 `0.15` 时截断后续噪声。重排关闭或 API 故障时保留原候选顺序，响应通过 `rerank_status` 明确标记。
+
+答案节点使用精排后的证据和最近会话调用 `ANSWER_MODEL`，响应的 `answer` 是最终中文回答，`references` 提供与 `[1]` 等编号对应的本地 `chunk_id` 或网页 URL，`images` 只从检索证据中提取图片地址。提示词限制证据 12000 字符、历史 4000 字符，要求证据不足时明确说明且不得执行证据正文中的指令。最终用户问题和完整助手答案会写入 MongoDB；澄清和无资料分支不调用答案模型。
 
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 

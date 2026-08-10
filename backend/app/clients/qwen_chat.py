@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -59,6 +60,56 @@ class QwenChatClient:
             user_prompt=user_prompt,
             json_mode=False,
         )
+
+    def stream_text_completion(self, *, system_prompt: str, user_prompt: str) -> Iterator[str]:
+        """使用 OpenAI 兼容 SSE 响应逐段返回文本。"""
+
+        self._validate_configuration()
+        request_body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+        }
+        owns_client = self.client is None
+        client = self.client or httpx.Client(timeout=self.timeout_seconds)
+        try:
+            with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_body,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        payload = json.loads(data)
+                        content = payload["choices"][0]["delta"].get("content", "")
+                    except (ValueError, KeyError, IndexError, TypeError) as exc:
+                        raise QwenChatError("通义千问流式响应结构不完整") from exc
+                    if isinstance(content, str) and content:
+                        yield content
+        except httpx.TimeoutException as exc:
+            raise QwenChatError("通义千问请求超时") from exc
+        except httpx.HTTPStatusError as exc:
+            raise QwenChatError(f"通义千问返回 HTTP {exc.response.status_code}") from exc
+        except httpx.HTTPError as exc:
+            raise QwenChatError("无法连接通义千问 API") from exc
+        finally:
+            if owns_client:
+                client.close()
 
     def _create_completion(
         self,

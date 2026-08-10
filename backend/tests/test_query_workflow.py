@@ -4,6 +4,7 @@ from app.clients.dashscope_embedding import TextEmbedding
 from app.core.config import Settings
 from app.workflows.querying.graph import create_query_workflow, route_after_item_name
 from app.workflows.querying.nodes import (
+    AnswerGenerationNode,
     HydeSearchNode,
     ItemNameConfirmNode,
     QueryEmbeddingNode,
@@ -67,6 +68,10 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
             settings=Settings(_env_file=None, rerank_min_top_k=1),
             reranker=lambda _query, documents: [0.9 for _document in documents],
         ),
+        answer_node=AnswerGenerationNode(
+            settings=Settings(_env_file=None),
+            generator=lambda _system, _user: "请将旋钮转到直流电压档。[1]",
+        ),
     )
 
     result = workflow.invoke(create_query_state("它怎么测直流电压？", search_limit=3))
@@ -81,6 +86,7 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
         "web_search_node",
         "rrf_node",
         "rerank_node",
+        "answer_generation_node",
     }
     assert result["item_names"] == ["RS-12 数字万用表"]
     assert result["query_status"] == "confirmed"
@@ -92,6 +98,8 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
     assert result["rrf_results"][0]["source_paths"] == ["vector", "hyde"]
     assert result["rerank_status"] == "succeeded"
     assert result["reranked_documents"][0]["chunk_id"] == 42
+    assert result["answer"] == "请将旋钮转到直流电压档。[1]"
+    assert result["answer_references"][0]["chunk_id"] == 42
     assert set(result["node_durations_ms"]) == set(result["completed_nodes"])
 
 
@@ -121,9 +129,13 @@ def test_query_workflow_stops_before_embedding_when_name_needs_clarification() -
         "RS-12 数字万用表",
         "RS-13 数字万用表",
     ]
-    assert result["completed_nodes"] == ["item_name_confirm_node"]
+    assert result["completed_nodes"] == [
+        "item_name_confirm_node",
+        "answer_generation_node",
+    ]
     assert result["query_dense_vector"] == []
     assert result["search_results"] == []
+    assert result["answer"] == result["clarification"]
 
 
 def test_route_rejects_missing_decision_status() -> None:
