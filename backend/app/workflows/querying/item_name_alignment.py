@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from typing import TypedDict
 
@@ -113,6 +114,13 @@ class ItemNameAligner:
                 self._append_unique(confirmed, exact["item_name"])
                 continue
 
+            if len(ordered) == 1 and self._shares_model_identifier(
+                extracted_name,
+                ordered[0]["item_name"],
+            ):
+                self._append_unique(confirmed, ordered[0]["item_name"])
+                continue
+
             high = [
                 candidate
                 for candidate in ordered
@@ -147,3 +155,22 @@ class ItemNameAligner:
     def _append_unique(values: list[str], value: str) -> None:
         if value.casefold() not in {existing.casefold() for existing in values}:
             values.append(value)
+
+    @staticmethod
+    def _shares_model_identifier(extracted_name: str, candidate_name: str) -> bool:
+        """识别 RS-12 这类低分但唯一的精确型号别名。"""
+
+        def identifiers(value: str) -> set[str]:
+            tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value)
+            normalized: set[str] = set()
+            for token in tokens:
+                identifier = re.sub(r"[^a-z0-9]", "", token.casefold())
+                if (
+                    len(identifier) >= 3
+                    and any(character.isalpha() for character in identifier)
+                    and any(character.isdigit() for character in identifier)
+                ):
+                    normalized.add(identifier)
+            return normalized
+
+        return bool(identifiers(extracted_name) & identifiers(candidate_name))

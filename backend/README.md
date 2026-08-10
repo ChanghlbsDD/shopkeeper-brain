@@ -50,6 +50,8 @@ $env:RUN_INTEGRATION_TESTS='1'
 Remove-Item Env:RUN_INTEGRATION_TESTS
 ```
 
+完整 RAG 集成测试会把 `tests/fixtures/rs12_e2e_manual.md` 复制到临时目录，真实执行 Markdown 切分、商品识别、云端向量化、Milvus 入库、三路召回、RRF、云端重排和答案生成，并在测试结束后删除本次插入的 Milvus 记录。测试文档不包含密钥，API Token 仍只从本机环境读取。
+
 ## PDF 转 Markdown
 
 项目通过 MinerU 精准解析云端 API 把 PDF 转为 Markdown，不在本机或业务服务器安装 MinerU、PyTorch 和解析模型。先在 [MinerU API 管理页面](https://mineru.net/apiManage/token)创建 Token，再把 Token 写入仓库根目录的本机 `.env`：
@@ -117,7 +119,7 @@ IMPORT_SOURCE_ARCHIVE_ENABLED=true
 
 ## 知识召回 HTTP API
 
-当前查询流程先由通义千问根据问题和最近历史消息提取商品名并改写问题，再用百炼和 Milvus 把提取名称与知识库标准名称对齐。名称明确时继续生成查询向量和召回片段；名称接近多个商品时直接返回候选项；没有可信候选时提示用户补充型号。此阶段只返回检索片段或澄清提示，尚不生成最终答案。
+当前查询流程先由通义千问根据问题和最近历史消息提取商品名并改写问题，再用百炼和 Milvus 把提取名称与知识库标准名称对齐。名称明确时继续生成查询向量和召回片段；名称接近多个商品时直接返回候选项；没有可信候选时提示用户补充型号。召回结果经过 RRF 和云端 Reranker 后，由通义千问生成带结构化引用的最终答案。
 
 | 方法 | 地址 | 作用 |
 | --- | --- | --- |

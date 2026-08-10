@@ -184,7 +184,8 @@ class MilvusHybridSearcher:
         for raw_hit in raw_hits:
             hit = cls._as_mapping(raw_hit)
             entity = cls._as_mapping(hit.get("entity", {}))
-            chunk_id = hit.get("id")
+            # pymilvus 的真实 Hit 使用主键字段名，部分旧版本和测试映射使用 id。
+            chunk_id = hit.get("chunk_id", hit.get("id"))
             score = hit.get("distance")
             if not isinstance(chunk_id, int) or isinstance(chunk_id, bool):
                 raise MilvusSearchError("Milvus 结果缺少有效 chunk_id")

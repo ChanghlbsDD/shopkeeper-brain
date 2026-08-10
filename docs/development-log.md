@@ -3293,3 +3293,145 @@ PDF / Markdown
 ### 一句话总结
 
 第 19 步把后端完整 RAG 工作流通过同步、SSE 和历史接口交给 Vue 使用，至此课程笔记中的文档入库到可追溯问答主链路全部完成。
+
+## 第 20 步：真实环境端到端联调验收
+
+日期：2026-08-10
+
+### 本步目标
+
+不再只依赖单元测试和假客户端，启动本机 Docker、FastAPI 与 Vue，使用受控产品手册真实调用通义千问、百炼向量、云端 Reranker、Milvus、MinIO 和 MongoDB，跑通“上传 → 入库 → 同步问答 → SSE → 会话历史”的完整链路，并修复真实服务响应暴露的兼容问题。
+
+### 与上一步的目录区别
+
+```text
+backend/tests/
+└─ fixtures/
+   └─ rs12_e2e_manual.md
+```
+
+本步只新增一份不含密钥的联调手册；其他变化均为修复或加强已有代码和测试。
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/tests/fixtures/rs12_e2e_manual.md` | 提供固定的 RS-12 数字万用表知识，供真实导入、检索、引用答案和可重复集成测试使用。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `backend/app/workflows/querying/item_name_alignment.py` | 当知识库候选唯一且与提取结果共享精确字母数字型号时，允许低向量分确认；泛称仍受原置信度阈值限制。 |
+| `backend/app/clients/milvus_search.py` | 同时接受真实 pymilvus 的主键字段名 `chunk_id` 和兼容映射中的 `id`。 |
+| `backend/tests/test_item_name_alignment.py` | 覆盖唯一型号低分确认和泛称低分拒绝。 |
+| `backend/tests/test_milvus_search.py` | 使用真实主键键名模拟响应，并保留旧式 `id` 兼容测试。 |
+| `backend/tests/integration/test_query_search.py` | 从固定手册开始自动完成真实导入和完整问答，验证八个查询节点，并清理本次 Milvus 数据。 |
+| `backend/README.md` | 增加可重复真实 RAG 测试说明，并修正旧的“尚未生成答案”描述。 |
+
+### 真实运行环境
+
+本次实际启动并确认健康：
+
+| 组件 | 验收结果 |
+| --- | --- |
+| etcd | Docker 健康检查通过。 |
+| MinIO | Docker 健康检查和 FastAPI 客户端检查通过。 |
+| Milvus | Docker 健康检查、真实写入、查询和清理通过。 |
+| MongoDB | Docker 健康检查、会话读写和删除通过。 |
+| Attu | 页面容器运行，可用于检查 Milvus。 |
+| FastAPI | `http://127.0.0.1:8000/api/health` 返回 `ok`。 |
+| Vue/Vite | `http://127.0.0.1:5173` 返回 200，API 代理可访问会话历史。 |
+
+`MINERU_API_TOKEN` 与 `DASHSCOPE_API_KEY` 只检查“是否存在”，没有打印或写入仓库。本次输入是 Markdown，因此按正常流程跳过 PDF 专属的 MinerU 节点；MinerU Token 没有在本次验收中消耗。
+
+### 真实文档导入结果
+
+通过 `POST /api/imports` 上传联调手册，任务 `2c7c9114395742e9a30cb01e8501d486` 完成：
+
+```text
+upload_file
+  → entry_node
+  → md_img_node
+  → document_split_node
+  → item_name_recognition_node
+  → bge_embedding_node
+  → import_milvus_node
+```
+
+- 商品识别结果：`RS-12 数字万用表`。
+- 生成并写入知识片段：5 条。
+- 通义千问商品识别、百炼 `text-embedding-v4` 和 Milvus 写入均为真实调用。
+- Markdown 没有本地图片，因此图片节点真实运行但没有上传对象。
+- 原始上传文件已按配置归档到 MinIO 私有知识桶。
+
+### 联调发现并修复的问题
+
+#### 1. 完整商品名与型号别名分数偏低
+
+通义千问从问题中提取 `RS-12`，Milvus 中保存的是 `RS-12 数字万用表`。因为候选检索复用“商品名 + 正文”的片段向量，唯一候选实际融合分数为 `0.4796`，低于原中置信阈值 `0.60`，导致知识库明明有产品却返回“未识别”。
+
+修复后仅在以下条件同时满足时低分确认：
+
+1. 知识库只返回一个标准商品候选。
+2. 提取名称与标准名称共享包含字母和数字的精确型号，例如 `RS-12`。
+
+“万用表”这类没有精确型号的泛称不会绕过阈值；知识库存在多个候选时也继续使用原分数与澄清规则。
+
+#### 2. pymilvus 真实主键键名不同
+
+测试映射中的搜索结果使用 `id`，当前 pymilvus 的真实 `Hit` 使用集合主键字段名 `chunk_id`。原解析器因此把正常结果判成“缺少有效 chunk_id”。修复后优先读取 `chunk_id`，同时保留 `id` 兼容，避免绑定单一客户端版本。
+
+### 完整问答结果
+
+修复后同步查询成功完成八个节点：
+
+```text
+item_name_confirm_node → query_embedding_node
+  → vector_search_node + hyde_search_node + web_search_node
+  → rrf_node → rerank_node → answer_generation_node
+```
+
+- 查询状态：`retrieved`。
+- 直接检索：3 条；HyDE：成功；网页检索：按默认配置关闭。
+- RRF 融合：3 条；云端 Reranker：成功并保留 3 条。
+- 最终答案正确说明黑表笔接 COM、红表笔接 VΩ，并明确电压测量应并联。
+- 结构化引用：3 条；MongoDB 写入：成功。
+
+### SSE 与历史验收
+
+真实 `POST /api/queries/stream` 返回：
+
+- HTTP 200 和 `text/event-stream`。
+- `progress` 事件 8 个。
+- 通义千问真实 `delta` 文本事件 13 个。
+- `final` 事件 1 个，`error` 事件 0 个。
+
+专用 SSE 会话随后通过历史接口读到 `user, assistant` 两条消息；DELETE 返回删除 2 条，再次读取为 0。另一个成功会话保留两条消息，Vue 通过 Vite `/api` 代理能够正常恢复。
+
+### 可重复集成测试
+
+查询集成测试不再依赖人工预先导入数据。它会：
+
+1. 把固定手册复制到 Pytest 临时目录。
+2. 真实执行导入工作流并记录本轮 `milvus_ids`。
+3. 真实执行完整查询工作流并验证召回、精排、答案和引用。
+4. 在 `finally` 中只删除本轮插入的 Milvus 主键，不破坏用户已有知识。
+
+本次五个真实集成测试全部通过，包含基础设施、MinIO 上传、Milvus 临时集合、MongoDB 历史和完整 RAG 链路。
+
+### 测试与验证
+
+- Ruff 格式与静态检查通过。
+- 常规后端测试共 254 个通过，5 个真实集成测试默认跳过。
+- 设置 `RUN_INTEGRATION_TESTS=1` 后，5 个真实集成测试全部通过。
+- 前端 16 个 Vitest 测试、TypeScript 检查和生产构建通过。
+- Token、向量和模型响应原文均未加入 Git；测试只提交可公开的手册内容。
+
+### 当前状态与下一步
+
+本机 Docker、FastAPI 和 Vue 当前保持运行，可以直接打开 `http://127.0.0.1:5173` 手动体验。项目功能已经通过真实服务验收；下一步是第 21 步服务器部署准备，包括应用镜像、低内存参数、反向代理、HTTPS、持久化卷和部署检查清单。
+
+### 一句话总结
+
+第 20 步用真实 Docker 与云端 API 跑通了文档入库到 Vue 会话恢复的完整链路，并修复了只有真实 Milvus 数据才能暴露的型号低分和主键字段兼容问题。

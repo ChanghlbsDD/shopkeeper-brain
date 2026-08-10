@@ -20,7 +20,7 @@ class FakeMilvusSearchClient:
         self.results: Any = [
             [
                 {
-                    "id": 42,
+                    "chunk_id": 42,
                     "distance": 0.87,
                     "entity": {
                         "content": "将量程旋钮转到直流电压档。",
@@ -101,6 +101,15 @@ def test_search_without_item_name_does_not_add_scalar_filter() -> None:
 
     assert client.search_kwargs is not None
     assert all(request._expr is None for request in client.search_kwargs["reqs"])  # noqa: SLF001
+
+
+def test_accepts_legacy_generic_id_key_from_milvus_mapping() -> None:
+    client = FakeMilvusSearchClient()
+    client.results[0][0]["id"] = client.results[0][0].pop("chunk_id")
+
+    hits = create_searcher(client).search(DENSE_VECTOR, {7: 0.8})
+
+    assert hits[0]["chunk_id"] == 42
 
 
 def test_reports_empty_knowledge_collection() -> None:

@@ -24,6 +24,30 @@ def test_exact_name_match_is_confirmed_even_when_score_is_below_threshold() -> N
     assert options == []
 
 
+def test_unique_exact_model_alias_is_confirmed_even_when_vector_score_is_low() -> None:
+    confirmed, options = align_with([{"item_name": "RS-12 数字万用表", "score": 0.48}])
+
+    assert confirmed == ["RS-12 数字万用表"]
+    assert options == []
+
+
+def test_generic_unique_name_still_requires_minimum_vector_confidence() -> None:
+    aligner = ItemNameAligner(
+        Settings(_env_file=None),
+        matcher=lambda _names: [
+            {
+                "extracted_name": "万用表",
+                "matches": [{"item_name": "RS-12 数字万用表", "score": 0.48}],
+            }
+        ],  # type: ignore[arg-type]
+    )
+
+    confirmed, options = aligner.align(["万用表"])
+
+    assert confirmed == []
+    assert options == []
+
+
 def test_unique_high_confidence_candidate_is_confirmed() -> None:
     confirmed, options = align_with(
         [
