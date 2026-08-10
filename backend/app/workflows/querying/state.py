@@ -23,6 +23,20 @@ class QueryHistoryMessage(TypedDict):
     content: str
 
 
+class RrfSearchHit(TypedDict):
+    """直接检索与 HyDE 按名次融合后的本地知识片段。"""
+
+    chunk_id: int
+    rrf_score: float
+    source_paths: list[Literal["vector", "hyde"]]
+    content: str
+    title: str
+    parent_title: str
+    file_title: str
+    item_name: str
+    part: int | None
+
+
 class QueryGraphState(TypedDict, total=False):
     """在商品名确认、向量化和三路召回节点之间传递的数据。"""
 
@@ -41,6 +55,7 @@ class QueryGraphState(TypedDict, total=False):
     hyde_status: Literal["pending", "disabled", "succeeded", "failed"]
     hyde_document: str
     hyde_search_results: list[MilvusSearchHit]
+    rrf_results: list[RrfSearchHit]
     web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
     web_search_results: list[WebSearchResult]
     completed_nodes: Annotated[list[str], operator.add]
@@ -63,6 +78,7 @@ DEFAULT_QUERY_STATE: QueryGraphState = {
     "hyde_status": "pending",
     "hyde_document": "",
     "hyde_search_results": [],
+    "rrf_results": [],
     "web_search_status": "pending",
     "web_search_results": [],
     "completed_nodes": [],

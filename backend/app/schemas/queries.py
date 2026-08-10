@@ -68,6 +68,20 @@ class QueryWebSearchHitResponse(BaseModel):
     snippet: str
 
 
+class QueryRrfSearchHitResponse(BaseModel):
+    """直接检索与 HyDE 经 RRF 融合后的本地片段。"""
+
+    chunk_id: int
+    rrf_score: float
+    source_paths: list[Literal["vector", "hyde"]]
+    content: str
+    title: str
+    parent_title: str
+    file_title: str
+    item_name: str
+    part: int | None = None
+
+
 class QuerySearchResponse(BaseModel):
     """商品名确认、问题改写和混合召回结果。"""
 
@@ -85,6 +99,7 @@ class QuerySearchResponse(BaseModel):
     hyde_matches: list[QuerySearchHitResponse]
     web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
     web_matches: list[QueryWebSearchHitResponse]
+    fused_matches: list[QueryRrfSearchHitResponse]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
@@ -126,6 +141,10 @@ class QuerySearchResponse(BaseModel):
             web_matches=[
                 QueryWebSearchHitResponse.model_validate(hit)
                 for hit in state.get("web_search_results", [])
+            ],
+            fused_matches=[
+                QueryRrfSearchHitResponse.model_validate(hit)
+                for hit in state.get("rrf_results", [])
             ],
             completed_nodes=list(state.get("completed_nodes", [])),
             node_durations_ms=dict(state.get("node_durations_ms", {})),

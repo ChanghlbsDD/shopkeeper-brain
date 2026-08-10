@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     mcp_dashscope_base_url: str = "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
     web_search_count: int = Field(default=3, ge=1, le=10)
     web_search_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    query_rrf_k: int = Field(default=60, ge=1, le=1000)
+    query_rrf_max_results: int = Field(default=10, ge=1, le=100)
+    query_rrf_vector_weight: float = Field(default=1.0, ge=0, le=10)
+    query_rrf_hyde_weight: float = Field(default=1.0, ge=0, le=10)
 
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
@@ -123,6 +127,8 @@ class Settings(BaseSettings):
             ("https://", "http://")
         ):
             raise ValueError("MCP_DASHSCOPE_BASE_URL 配置无效")
+        if self.query_rrf_vector_weight + self.query_rrf_hyde_weight <= 0:
+            raise ValueError("RRF 直接检索和 HyDE 权重不能同时为 0")
         return self
 
     @property

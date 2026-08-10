@@ -92,6 +92,19 @@ def api_query_runner(
         "hyde_search_results": [],
         "web_search_status": "disabled",
         "web_search_results": [],
+        "rrf_results": [
+            {
+                "chunk_id": 42,
+                "rrf_score": 0.0325,
+                "source_paths": ["vector", "hyde"],
+                "content": "将量程旋钮转到直流电压档。",
+                "title": "直流电压测量",
+                "parent_title": "基本测量",
+                "file_title": "RS-12 用户手册",
+                "item_name": "RS-12 数字万用表",
+                "part": 1,
+            }
+        ],
         "completed_nodes": [
             "item_name_confirm_node",
             "query_embedding_node",
@@ -137,6 +150,9 @@ def test_query_search_returns_safe_retrieval_result(query_service: QueryService)
     assert payload["hyde_matches"] == []
     assert payload["web_search_status"] == "disabled"
     assert payload["web_matches"] == []
+    assert payload["fused_matches"][0]["chunk_id"] == 42
+    assert payload["fused_matches"][0]["source_paths"] == ["vector", "hyde"]
+    assert payload["fused_matches"][0]["rrf_score"] == 0.0325
     assert "query_dense_vector" not in payload
     assert "query_sparse_vector" not in payload
 

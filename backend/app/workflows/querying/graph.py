@@ -12,6 +12,7 @@ from app.workflows.querying.nodes import (
     HydeSearchNode,
     ItemNameConfirmNode,
     QueryEmbeddingNode,
+    RrfNode,
     VectorSearchNode,
     WebSearchNode,
 )
@@ -26,6 +27,7 @@ QUERY_EMBEDDING_NODE = "query_embedding_node"
 VECTOR_SEARCH_NODE = "vector_search_node"
 HYDE_SEARCH_NODE = "hyde_search_node"
 WEB_SEARCH_NODE = "web_search_node"
+RRF_NODE = "rrf_node"
 
 
 def route_after_item_name(state: QueryGraphState) -> Literal["search", "stop"]:
@@ -46,6 +48,7 @@ def create_query_workflow(
     search_node: BaseQueryNode | None = None,
     hyde_search_node: BaseQueryNode | None = None,
     web_search_node: BaseQueryNode | None = None,
+    rrf_node: BaseQueryNode | None = None,
 ) -> CompiledStateGraph:
     """创建并编译商品确认后并行执行三路召回的查询流程。"""
 
@@ -55,6 +58,7 @@ def create_query_workflow(
     graph.add_node(VECTOR_SEARCH_NODE, search_node or VectorSearchNode())
     graph.add_node(HYDE_SEARCH_NODE, hyde_search_node or HydeSearchNode())
     graph.add_node(WEB_SEARCH_NODE, web_search_node or WebSearchNode())
+    graph.add_node(RRF_NODE, rrf_node or RrfNode())
     graph.add_edge(START, ITEM_NAME_CONFIRM_NODE)
     graph.add_conditional_edges(
         ITEM_NAME_CONFIRM_NODE,
@@ -64,9 +68,10 @@ def create_query_workflow(
     graph.add_edge(QUERY_EMBEDDING_NODE, VECTOR_SEARCH_NODE)
     graph.add_edge(QUERY_EMBEDDING_NODE, HYDE_SEARCH_NODE)
     graph.add_edge(QUERY_EMBEDDING_NODE, WEB_SEARCH_NODE)
-    graph.add_edge(VECTOR_SEARCH_NODE, END)
-    graph.add_edge(HYDE_SEARCH_NODE, END)
+    graph.add_edge(VECTOR_SEARCH_NODE, RRF_NODE)
+    graph.add_edge(HYDE_SEARCH_NODE, RRF_NODE)
     graph.add_edge(WEB_SEARCH_NODE, END)
+    graph.add_edge(RRF_NODE, END)
     return graph.compile()
 
 

@@ -161,6 +161,10 @@ QUERY_ITEM_NAME_SPARSE_WEIGHT=0.5
 QUERY_HYDE_ENABLED=true
 QUERY_HYDE_MODEL=qwen-flash
 QUERY_HYDE_MAX_OUTPUT_TOKENS=512
+QUERY_RRF_K=60
+QUERY_RRF_MAX_RESULTS=10
+QUERY_RRF_VECTOR_WEIGHT=1.0
+QUERY_RRF_HYDE_WEIGHT=1.0
 WEB_SEARCH_ENABLED=false
 MCP_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp
 WEB_SEARCH_COUNT=3
@@ -173,7 +177,9 @@ WEB_SEARCH_TIMEOUT_SECONDS=60
 
 确认商品名并生成查询向量后，LangGraph 会并行执行三路召回：`matches` 是改写问题的直接 Milvus 混合检索，`hyde_matches` 是通义千问先生成假设技术文档、再向量化并检索得到的结果，`web_matches` 是可选的百炼 WebSearch MCP 结果。响应同时返回 `hyde_status` 和 `web_search_status`，取值为 `pending`、`disabled`、`succeeded` 或 `failed`。
 
-HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本生成和一次百炼向量请求；不需要时可设置 `QUERY_HYDE_ENABLED=false`。网页检索默认关闭，只有设置 `WEB_SEARCH_ENABLED=true` 才会使用同一个 `DASHSCOPE_API_KEY` 调用外部网页搜索。HyDE 或网页分支失败时会返回空结果并标记 `failed`，已有的直接知识库检索仍可继续；当前步骤只保留三路原始结果，尚未进行 RRF 融合排序。
+HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本生成和一次百炼向量请求；不需要时可设置 `QUERY_HYDE_ENABLED=false`。网页检索默认关闭，只有设置 `WEB_SEARCH_ENABLED=true` 才会使用同一个 `DASHSCOPE_API_KEY` 调用外部网页搜索。HyDE 或网页分支失败时会返回空结果并标记 `failed`，已有的直接知识库检索仍可继续。
+
+直接检索与 HyDE 结果会按 `weight / (k + rank)` 计算 RRF 分数，以 `chunk_id` 去重后写入 `fused_matches`。默认 `k=60`、两路权重均为 `1.0`，最多保留 10 条；`source_paths` 标明片段来自 `vector`、`hyde` 或同时命中两路。原始 `matches` 和 `hyde_matches` 仍保留用于调试。网页结果没有本地 `chunk_id`，按课程流程不进入本轮 RRF，将在下一阶段与融合后的本地片段一起重排。
 
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 

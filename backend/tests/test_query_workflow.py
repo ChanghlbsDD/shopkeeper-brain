@@ -7,6 +7,7 @@ from app.workflows.querying.nodes import (
     HydeSearchNode,
     ItemNameConfirmNode,
     QueryEmbeddingNode,
+    RrfNode,
     VectorSearchNode,
     WebSearchNode,
 )
@@ -43,12 +44,24 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
             settings=Settings(_env_file=None, query_hyde_enabled=True),
             document_generator=lambda _query, _names: "假设技术文档",
             embedder=lambda _text: TextEmbedding([0.3, 0.4], {8: 0.7}),
-            searcher=lambda _dense, _sparse, _names, _limit: [],
+            searcher=lambda _dense, _sparse, _names, _limit: [
+                {
+                    "chunk_id": 42,
+                    "score": 0.88,
+                    "content": "HyDE 找到的同一片段。",
+                    "title": "直流电压测量",
+                    "parent_title": "测量",
+                    "file_title": "RS-12 手册",
+                    "item_name": "RS-12 数字万用表",
+                    "part": 1,
+                }
+            ],
         ),
         web_search_node=WebSearchNode(
             settings=Settings(_env_file=None, web_search_enabled=True),
             searcher=lambda _query, _count: [],
         ),
+        rrf_node=RrfNode(settings=Settings(_env_file=None)),
     )
 
     result = workflow.invoke(create_query_state("它怎么测直流电压？", search_limit=3))
@@ -61,6 +74,7 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
         "vector_search_node",
         "hyde_search_node",
         "web_search_node",
+        "rrf_node",
     }
     assert result["item_names"] == ["RS-12 数字万用表"]
     assert result["query_status"] == "confirmed"
@@ -68,6 +82,8 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
     assert result["search_results"][0]["chunk_id"] == 42
     assert result["hyde_status"] == "succeeded"
     assert result["web_search_status"] == "succeeded"
+    assert result["rrf_results"][0]["chunk_id"] == 42
+    assert result["rrf_results"][0]["source_paths"] == ["vector", "hyde"]
     assert set(result["node_durations_ms"]) == set(result["completed_nodes"])
 
 

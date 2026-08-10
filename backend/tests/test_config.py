@@ -140,6 +140,10 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
     assert settings.query_hyde_model == "qwen-flash"
     assert settings.web_search_enabled is False
     assert settings.web_search_count == 3
+    assert settings.query_rrf_k == 60
+    assert settings.query_rrf_max_results == 10
+    assert settings.query_rrf_vector_weight == 1.0
+    assert settings.query_rrf_hyde_weight == 1.0
 
     with pytest.raises(ValidationError, match="不能同时为 0"):
         Settings(
@@ -170,4 +174,11 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
             _env_file=None,
             web_search_enabled=True,
             mcp_dashscope_base_url="not-a-url",
+        )
+
+    with pytest.raises(ValidationError, match="RRF"):
+        Settings(
+            _env_file=None,
+            query_rrf_vector_weight=0,
+            query_rrf_hyde_weight=0,
         )
