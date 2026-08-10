@@ -2901,3 +2901,144 @@ QUERY_RRF_HYDE_WEIGHT=1.0
 ### 一句话总结
 
 第 16 步用 RRF 把直接检索和 HyDE 的名次转成可比较的统一分数，在去重后生成稳定、轻量的本地候选排名。
+
+## 第 17 步：云端 Reranker 精排与断崖截取
+
+日期：2026-08-10
+
+### 本步目标
+
+还原课程 day12 后半段和 day13 的 Reranker 节点：把 RRF 本地候选与网页摘要统一成同一结构，使用交叉编码器重算“问题—文档”相关性，再通过动态断崖检测去掉分数明显下降后的噪声。
+
+课程原版下载 `bge-reranker-large` 到本地运行。当前服务器只有 2 核 2 GiB，本项目改用百炼云端重排 API，不下载模型；算法顺序、文档合并和断崖逻辑保持一致。
+
+### 与上一步的目录区别
+
+```text
+backend/
+├─ app/
+│  ├─ clients/
+│  │  └─ dashscope_rerank.py
+│  └─ workflows/querying/nodes/
+│     └─ rerank.py
+└─ tests/
+   ├─ test_dashscope_rerank.py
+   └─ test_rerank_node.py
+```
+
+### 每个新文件的作用
+
+| 新文件 | 作用 |
+| --- | --- |
+| `backend/app/clients/dashscope_rerank.py` | 封装百炼 `gte-rerank-v2` 与 `qwen3-rerank` 两种 HTTP 请求结构，校验索引和分数，并把响应恢复成输入文档顺序。 |
+| `backend/app/workflows/querying/nodes/rerank.py` | 合并本地和网页证据、调用云端精排、按分数排序、执行最大断崖截取，并在故障时安全降级。 |
+| `backend/tests/test_dashscope_rerank.py` | 验证两种接口请求、鉴权、乱序索引恢复、分数范围和结果完整性。 |
+| `backend/tests/test_rerank_node.py` | 验证来源合并、网页提升、最大断崖、最小数量、关闭开关和 API 故障降级。 |
+
+### 本步修改的已有文件
+
+| 文件 | 修改内容 |
+| --- | --- |
+| `.env.example` | 增加重排开关、API 地址、模型、超时、文档长度和断崖参数。 |
+| `backend/README.md` | 增加云端重排配置、模型切换和降级说明。 |
+| `backend/app/core/config.py` | 增加重排参数范围、URL、模型和最小/最大数量组合校验。 |
+| `backend/app/workflows/querying/state.py` | 增加统一重排文档、重排状态和最终候选列表。 |
+| `backend/app/workflows/querying/graph.py` | 三路检索先汇合，再执行 RRF 和 Reranker，保证网页结果在精排前已经准备完成。 |
+| `backend/app/workflows/querying/nodes/__init__.py` | 导出 `RerankNode`。 |
+| `backend/app/schemas/queries.py` | API 新增 `rerank_status` 与 `ranked_matches`。 |
+| `backend/tests/test_config.py` | 验证默认模型、断崖参数和最小值不能大于最大值。 |
+| `backend/tests/test_query_workflow.py` | 注入假重排器，验证完整图不会访问真实 API。 |
+| `backend/tests/test_query_api.py` | 验证精排来源、分数和片段字段能安全返回。 |
+
+### 为什么改用云端重排
+
+课程本地重排器需要在服务器加载 Transformer 交叉编码器；它比向量模型更慢，常驻内存也远超当前服务器余量。百炼提供面向 RAG 的文本重排模型，输入问题和候选文档后返回索引与相关性分数：[百炼文本排序文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)。
+
+本项目默认配置：
+
+```dotenv
+RERANK_API_BASE=https://dashscope.aliyuncs.com/api/v1
+RERANK_MODEL=gte-rerank-v2
+```
+
+它复用已有 `DASHSCOPE_API_KEY`。官方当前推荐的新模型是 `qwen3-rerank`，但该模型使用业务空间专属的兼容地址；切换时需把模型改为 `qwen3-rerank`，并把 API 地址改为形如 `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-api/v1` 的真实地址。客户端已兼容这种请求结构，但项目不猜测用户的 Workspace ID。
+
+### 文档统一结构
+
+```text
+RRF 本地片段                  WebSearch 网页摘要
+chunk_id / content / title    url / snippet / title
+          └──────────────┬──────────────┘
+                         ↓
+{
+  source,
+  content,
+  title,
+  chunk_id,
+  url,
+  item_name,
+  source_paths,
+  rerank_score
+}
+```
+
+本地文档保留 `chunk_id`、商品名和直接/HyDE 命中路线；网页文档保留 URL。网页按 URL 去重，空摘要、非法 URL 和无正文本地记录会被跳过。每条送往 API 的内容最多 8000 字符，防止异常大输入。
+
+### 断崖检测
+
+精排结果先按 `rerank_score` 降序排列，然后在允许的前 10 条中寻找最大的相邻分数差：
+
+```text
+0.98, 0.91, 0.86, 0.10
+                  ↑ 最大断崖 0.76
+结果保留前三条
+```
+
+只有落差大于 `RERANK_GAP_ABS=0.15` 才截断，同时至少保留 `RERANK_MIN_TOP_K=3` 条；候选不足 3 条时全部保留。课程笔记同时讨论了“第一断崖”和“最大断崖”，最终代码使用最大断崖，本项目与最终代码一致。
+
+### 查询图变化
+
+```text
+query_embedding_node
+  ├─ vector_search_node ─┐
+  ├─ hyde_search_node ───┼─→ retrieval_join_node
+  └─ web_search_node ────┘
+                              ↓
+                          rrf_node
+                              ↓
+                         rerank_node
+                              ↓
+                             END
+```
+
+虚拟汇合节点不改数据，只建立三路同步屏障。RRF 仍只读取本地两路，Reranker 则读取 RRF 输出和已经完成的网页结果。
+
+### 故障降级
+
+- 没有候选：`rerank_status=skipped`。
+- 配置关闭：`rerank_status=disabled`，按 RRF 本地在前、网页在后的原顺序保留。
+- API 超时、鉴权失败、分数缺失或响应异常：`rerank_status=failed`，同样保留原候选，不中断后续答案生成。
+- 调用成功：`rerank_status=succeeded`，返回断崖截取后的统一候选。
+
+上游响应正文、Token 和业务空间信息不会进入 API 错误消息。
+
+### 测试与验证
+
+- Ruff 静态检查与格式检查通过。
+- Pytest 共 241 个测试通过，5 个显式集成测试默认跳过。
+- 所有重排测试使用 `httpx.MockTransport` 或函数注入，没有消耗真实 Token。
+- 重排失败、关闭和无候选都有明确的状态与可继续使用的结果。
+
+### 当前边界
+
+- 默认重排模型与阈值尚未使用真实业务问题集校准。
+- 网页只有摘要，没有网页全文，重排只能判断摘要相关性。
+- 目前 API 返回候选但还没有生成最终自然语言答案。
+
+### 下一步
+
+第 18 步将实现答案生成：把精排证据与历史会话放入受字符预算控制的提示词，调用通义千问生成带引用的答案，并保存完整助手回复。
+
+### 一句话总结
+
+第 17 步用百炼云端交叉编码器替代服务器本地重排模型，在统一比较本地与网页证据后通过最大断崖动态去除噪声。

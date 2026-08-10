@@ -82,6 +82,19 @@ class QueryRrfSearchHitResponse(BaseModel):
     part: int | None = None
 
 
+class QueryRerankDocumentResponse(BaseModel):
+    """经过云端精排和断崖截取的本地或网页证据。"""
+
+    source: Literal["local", "web"]
+    content: str
+    title: str
+    chunk_id: int | None
+    url: str
+    item_name: str
+    source_paths: list[Literal["vector", "hyde"]]
+    rerank_score: float | None
+
+
 class QuerySearchResponse(BaseModel):
     """商品名确认、问题改写和混合召回结果。"""
 
@@ -100,6 +113,8 @@ class QuerySearchResponse(BaseModel):
     web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
     web_matches: list[QueryWebSearchHitResponse]
     fused_matches: list[QueryRrfSearchHitResponse]
+    rerank_status: Literal["pending", "disabled", "succeeded", "failed", "skipped"]
+    ranked_matches: list[QueryRerankDocumentResponse]
     completed_nodes: list[str]
     node_durations_ms: dict[str, float]
 
@@ -145,6 +160,11 @@ class QuerySearchResponse(BaseModel):
             fused_matches=[
                 QueryRrfSearchHitResponse.model_validate(hit)
                 for hit in state.get("rrf_results", [])
+            ],
+            rerank_status=state.get("rerank_status", "pending"),
+            ranked_matches=[
+                QueryRerankDocumentResponse.model_validate(document)
+                for document in state.get("reranked_documents", [])
             ],
             completed_nodes=list(state.get("completed_nodes", [])),
             node_durations_ms=dict(state.get("node_durations_ms", {})),

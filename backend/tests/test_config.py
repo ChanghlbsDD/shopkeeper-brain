@@ -144,6 +144,11 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
     assert settings.query_rrf_max_results == 10
     assert settings.query_rrf_vector_weight == 1.0
     assert settings.query_rrf_hyde_weight == 1.0
+    assert settings.rerank_enabled is True
+    assert settings.rerank_model == "gte-rerank-v2"
+    assert settings.rerank_min_top_k == 3
+    assert settings.rerank_max_top_k == 10
+    assert settings.rerank_gap_abs == 0.15
 
     with pytest.raises(ValidationError, match="不能同时为 0"):
         Settings(
@@ -182,3 +187,6 @@ def test_query_defaults_and_vector_weights_are_validated() -> None:
             query_rrf_vector_weight=0,
             query_rrf_hyde_weight=0,
         )
+
+    with pytest.raises(ValidationError, match="MIN_TOP_K"):
+        Settings(_env_file=None, rerank_min_top_k=5, rerank_max_top_k=4)

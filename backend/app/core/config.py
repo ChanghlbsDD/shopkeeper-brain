@@ -110,6 +110,14 @@ class Settings(BaseSettings):
     query_rrf_max_results: int = Field(default=10, ge=1, le=100)
     query_rrf_vector_weight: float = Field(default=1.0, ge=0, le=10)
     query_rrf_hyde_weight: float = Field(default=1.0, ge=0, le=10)
+    rerank_enabled: bool = True
+    rerank_api_base: str = "https://dashscope.aliyuncs.com/api/v1"
+    rerank_model: str = "gte-rerank-v2"
+    rerank_request_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    rerank_document_max_length: int = Field(default=8000, ge=100, le=50_000)
+    rerank_min_top_k: int = Field(default=3, ge=1, le=100)
+    rerank_max_top_k: int = Field(default=10, ge=1, le=100)
+    rerank_gap_abs: float = Field(default=0.15, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_document_chunk_lengths(self) -> Self:
@@ -129,6 +137,13 @@ class Settings(BaseSettings):
             raise ValueError("MCP_DASHSCOPE_BASE_URL 配置无效")
         if self.query_rrf_vector_weight + self.query_rrf_hyde_weight <= 0:
             raise ValueError("RRF 直接检索和 HyDE 权重不能同时为 0")
+        if self.rerank_enabled:
+            if not self.rerank_api_base.startswith(("https://", "http://")):
+                raise ValueError("RERANK_API_BASE 配置无效")
+            if not self.rerank_model.strip():
+                raise ValueError("RERANK_MODEL 不能为空")
+        if self.rerank_min_top_k > self.rerank_max_top_k:
+            raise ValueError("RERANK_MIN_TOP_K 不能大于 RERANK_MAX_TOP_K")
         return self
 
     @property

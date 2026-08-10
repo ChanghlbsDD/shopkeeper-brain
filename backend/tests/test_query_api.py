@@ -105,6 +105,19 @@ def api_query_runner(
                 "part": 1,
             }
         ],
+        "rerank_status": "succeeded",
+        "reranked_documents": [
+            {
+                "source": "local",
+                "content": "将量程旋钮转到直流电压档。",
+                "title": "直流电压测量",
+                "chunk_id": 42,
+                "url": "",
+                "item_name": "RS-12 数字万用表",
+                "source_paths": ["vector", "hyde"],
+                "rerank_score": 0.97,
+            }
+        ],
         "completed_nodes": [
             "item_name_confirm_node",
             "query_embedding_node",
@@ -153,6 +166,9 @@ def test_query_search_returns_safe_retrieval_result(query_service: QueryService)
     assert payload["fused_matches"][0]["chunk_id"] == 42
     assert payload["fused_matches"][0]["source_paths"] == ["vector", "hyde"]
     assert payload["fused_matches"][0]["rrf_score"] == 0.0325
+    assert payload["rerank_status"] == "succeeded"
+    assert payload["ranked_matches"][0]["chunk_id"] == 42
+    assert payload["ranked_matches"][0]["rerank_score"] == 0.97
     assert "query_dense_vector" not in payload
     assert "query_sparse_vector" not in payload
 

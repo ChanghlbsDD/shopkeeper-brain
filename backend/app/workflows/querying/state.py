@@ -37,6 +37,19 @@ class RrfSearchHit(TypedDict):
     part: int | None
 
 
+class RerankDocument(TypedDict):
+    """本地候选或网页摘要经过统一格式和云端精排后的文档。"""
+
+    source: Literal["local", "web"]
+    content: str
+    title: str
+    chunk_id: int | None
+    url: str
+    item_name: str
+    source_paths: list[Literal["vector", "hyde"]]
+    rerank_score: float | None
+
+
 class QueryGraphState(TypedDict, total=False):
     """在商品名确认、向量化和三路召回节点之间传递的数据。"""
 
@@ -56,6 +69,8 @@ class QueryGraphState(TypedDict, total=False):
     hyde_document: str
     hyde_search_results: list[MilvusSearchHit]
     rrf_results: list[RrfSearchHit]
+    rerank_status: Literal["pending", "disabled", "succeeded", "failed", "skipped"]
+    reranked_documents: list[RerankDocument]
     web_search_status: Literal["pending", "disabled", "succeeded", "failed"]
     web_search_results: list[WebSearchResult]
     completed_nodes: Annotated[list[str], operator.add]
@@ -79,6 +94,8 @@ DEFAULT_QUERY_STATE: QueryGraphState = {
     "hyde_document": "",
     "hyde_search_results": [],
     "rrf_results": [],
+    "rerank_status": "pending",
+    "reranked_documents": [],
     "web_search_status": "pending",
     "web_search_results": [],
     "completed_nodes": [],

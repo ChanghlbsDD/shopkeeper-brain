@@ -7,6 +7,7 @@ from app.workflows.querying.nodes import (
     HydeSearchNode,
     ItemNameConfirmNode,
     QueryEmbeddingNode,
+    RerankNode,
     RrfNode,
     VectorSearchNode,
     WebSearchNode,
@@ -62,6 +63,10 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
             searcher=lambda _query, _count: [],
         ),
         rrf_node=RrfNode(settings=Settings(_env_file=None)),
+        rerank_node=RerankNode(
+            settings=Settings(_env_file=None, rerank_min_top_k=1),
+            reranker=lambda _query, documents: [0.9 for _document in documents],
+        ),
     )
 
     result = workflow.invoke(create_query_state("它怎么测直流电压？", search_limit=3))
@@ -75,6 +80,7 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
         "hyde_search_node",
         "web_search_node",
         "rrf_node",
+        "rerank_node",
     }
     assert result["item_names"] == ["RS-12 数字万用表"]
     assert result["query_status"] == "confirmed"
@@ -84,6 +90,8 @@ def test_query_workflow_runs_confirmation_embedding_and_search_in_order() -> Non
     assert result["web_search_status"] == "succeeded"
     assert result["rrf_results"][0]["chunk_id"] == 42
     assert result["rrf_results"][0]["source_paths"] == ["vector", "hyde"]
+    assert result["rerank_status"] == "succeeded"
+    assert result["reranked_documents"][0]["chunk_id"] == 42
     assert set(result["node_durations_ms"]) == set(result["completed_nodes"])
 
 

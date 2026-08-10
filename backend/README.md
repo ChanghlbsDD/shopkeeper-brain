@@ -165,6 +165,14 @@ QUERY_RRF_K=60
 QUERY_RRF_MAX_RESULTS=10
 QUERY_RRF_VECTOR_WEIGHT=1.0
 QUERY_RRF_HYDE_WEIGHT=1.0
+RERANK_ENABLED=true
+RERANK_API_BASE=https://dashscope.aliyuncs.com/api/v1
+RERANK_MODEL=gte-rerank-v2
+RERANK_REQUEST_TIMEOUT_SECONDS=60
+RERANK_DOCUMENT_MAX_LENGTH=8000
+RERANK_MIN_TOP_K=3
+RERANK_MAX_TOP_K=10
+RERANK_GAP_ABS=0.15
 WEB_SEARCH_ENABLED=false
 MCP_DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp
 WEB_SEARCH_COUNT=3
@@ -180,6 +188,8 @@ WEB_SEARCH_TIMEOUT_SECONDS=60
 HyDE 默认开启，每次已确认查询会额外产生一次通义千问文本生成和一次百炼向量请求；不需要时可设置 `QUERY_HYDE_ENABLED=false`。网页检索默认关闭，只有设置 `WEB_SEARCH_ENABLED=true` 才会使用同一个 `DASHSCOPE_API_KEY` 调用外部网页搜索。HyDE 或网页分支失败时会返回空结果并标记 `failed`，已有的直接知识库检索仍可继续。
 
 直接检索与 HyDE 结果会按 `weight / (k + rank)` 计算 RRF 分数，以 `chunk_id` 去重后写入 `fused_matches`。默认 `k=60`、两路权重均为 `1.0`，最多保留 10 条；`source_paths` 标明片段来自 `vector`、`hyde` 或同时命中两路。原始 `matches` 和 `hyde_matches` 仍保留用于调试。网页结果没有本地 `chunk_id`，按课程流程不进入本轮 RRF，将在下一阶段与融合后的本地片段一起重排。
+
+`ranked_matches` 会合并 RRF 本地候选和网页摘要，再调用百炼文本重排 API 计算统一的 `rerank_score`。当前默认使用无需本地模型的 `gte-rerank-v2`；若使用 `qwen3-rerank`，需把 `RERANK_API_BASE` 改为百炼业务空间的 `compatible-api/v1` 地址。模型和接口差异见[百炼文本排序官方文档](https://help.aliyun.com/zh/model-studio/text-rerank-api)。排序后至少保留 3 条、最多 10 条，并在最大相邻分数落差超过 `0.15` 时截断后续噪声。重排关闭或 API 故障时保留原候选顺序，响应通过 `rerank_status` 明确标记。
 
 查询与导入共用同一个 FastAPI 服务和 `8000` 端口，不需要另启查询服务。首次查询前必须先成功导入至少一份文档；若 `knowledge_chunks` 集合尚不存在，API 返回 `QUERY_KNOWLEDGE_EMPTY`。通义千问和百炼调用失败、Milvus 不可用也会转换为统一安全错误。
 
